@@ -1,0 +1,4 @@
+# Personal data and account emails stay out of the public repository
+library-backup.json
+Card_Library_*
+firestore.rules

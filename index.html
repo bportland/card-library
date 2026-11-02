@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Pokémon Card Library</title>
+<meta name="description" content="A private Pokémon card collection tracker.">
+<meta name="theme-color" content="#2340c8">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Card Library">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=DM+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="gate">
+  <h1>Card Library</h1>
+  <p class="muted" id="gateMsg">Sign in with Google to open your collection.</p>
+  <button class="btn primary" id="signInBtn">Sign in with Google</button>
+  <button class="btn" id="gateOutBtn" hidden>Sign out</button>
+</div>
+
+<div class="wrap" id="app" hidden>
+  <header>
+    <h1>Card Library</h1>
+    <div class="tally" id="tally"></div>
+  </header>
+  <div id="banner" role="status" hidden></div>
+  <nav aria-label="Views">
+    <button class="tab" id="tab-library" data-view="library">Library</button>
+    <button class="tab" id="tab-sets" data-view="sets">Sets</button>
+    <button class="tab" id="tab-checklist" data-view="checklist">Pitch Black</button>
+    <button class="tab" id="tab-places" data-view="places">Boxes &amp; decks</button>
+    <div class="actions">
+      <button class="btn primary" id="addBtn" data-write>Add card</button>
+      <button class="btn" id="importBtn" data-write>Import TCGplayer CSV</button>
+      <button class="btn" id="pricesBtn" data-write>Update prices</button>
+      <input id="importFile" type="file" accept=".csv,text/csv" hidden>
+      <input id="restoreFile" type="file" accept=".json,application/json" hidden>
+    </div>
+  </nav>
+
+  <section id="view-library" hidden>
+    <div class="filters" style="margin-bottom:10px">
+      <label class="field search"><span>Search</span><input id="f-q" type="search" placeholder="Card name, number or note"></label>
+      <label class="field"><span>Type</span><select id="f-type"></select></label>
+      <label class="field"><span>Energy</span><select id="f-energy"></select></label>
+      <label class="field"><span>Set</span><select id="f-set"></select></label>
+      <label class="field"><span>Location</span><select id="f-loc"></select></label>
+      <label class="field"><span>Show</span><select id="f-check">
+        <option value="">Everything</option><option value="special">Stamped or patterned</option><option value="review">Needs review</option>
+        <option value="noset">No set recorded</option><option value="priced">Has a price</option></select></label>
+    </div>
+    <div class="resultbar" style="margin-bottom:8px">
+      <span class="muted small" id="resultCount"></span>
+      <span style="display:flex;gap:8px;align-items:center">
+        <button class="btn" id="clearFilters" hidden>Clear filters</button>
+        <label class="field" style="grid-auto-flow:column;align-items:center;gap:6px"><span>Sort</span><select id="f-sort">
+          <option value="name">Name</option><option value="set">Set and number</option><option value="count">Most copies</option><option value="rarity">Rarest first</option><option value="price">Highest value</option></select></label>
+      </span>
+    </div>
+    <div class="ledger" id="ledger"></div>
+    <div style="margin-top:10px;text-align:center"><button class="btn" id="more" hidden>Show more</button></div>
+  </section>
+
+  <section id="view-sets" hidden><div class="sets" id="sets"></div></section>
+  <section id="view-checklist" hidden><div id="checklist" style="display:grid;gap:10px"></div></section>
+  <section id="view-places" hidden><div id="places" style="display:grid;gap:12px"></div></section>
+  <footer class="foot">
+    <span class="muted small" id="who"></span>
+    <button class="btn" id="exportBtn">Export CSV</button>
+    <button class="btn" id="backupBtn">Download backup</button>
+    <button class="btn" id="signOutBtn">Sign out</button>
+  </footer>
+</div>
+
+<dialog id="editor"><form class="dlg" id="editForm" method="dialog">
+  <h2 id="editTitle">Add card</h2>
+  <img id="e-img" class="bigcard" alt="" hidden>
+  <div class="grid2">
+    <label class="field full"><span>Card name</span><input id="e-name" list="nameList" required autocomplete="off"></label>
+    <label class="field"><span>Card type</span><select id="e-type"></select></label>
+    <label class="field"><span>Detailed type</span><select id="e-detail"></select></label>
+    <label class="field"><span>Energy type</span><select id="e-energy"></select></label>
+    <label class="field"><span>Count</span><input id="e-count" type="number" min="1" step="1" inputmode="numeric" required></label>
+    <label class="field"><span>Set abbreviation</span><input id="e-set" list="setList" autocomplete="off"></label>
+    <label class="field"><span>Card number</span><input id="e-num" placeholder="086/217" autocomplete="off"></label>
+    <label class="field"><span>Rarity</span><select id="e-rarity"></select></label>
+    <label class="field"><span>Printing</span><select id="e-print"></select></label>
+    <label class="field"><span>Pattern</span><select id="e-pattern"></select></label>
+    <label class="field"><span>Stamp</span><select id="e-stamp"></select></label>
+    <label class="field"><span>Location</span><input id="e-loc" list="locList" required autocomplete="off"></label>
+    <label class="field"><span>Deck</span><input id="e-deck" list="deckList" autocomplete="off"></label>
+    <label class="field"><span>TCG market price ($)</span><input id="e-price" type="number" min="0" step="0.01" inputmode="decimal"></label>
+    <label class="field"><span>Notes</span><input id="e-notes" autocomplete="off"></label>
+  </div>
+  <div class="move" id="moveBox" hidden>
+    <label class="field"><span>Move copies</span><input id="m-count" type="number" min="1" step="1"></label>
+    <label class="field"><span>To location</span><input id="m-loc" list="locList" autocomplete="off"></label>
+    <label class="field"><span>Deck</span><input id="m-deck" list="deckList" autocomplete="off"></label>
+    <button class="btn" type="button" id="moveBtn">Move</button>
+  </div>
+  <div class="dlgfoot">
+    <button class="btn danger left" type="button" id="delBtn" hidden>Delete</button>
+    <button class="btn" type="button" id="cancelBtn">Cancel</button>
+    <button class="btn primary" type="submit" id="saveBtn">Save</button>
+  </div>
+</form></dialog>
+
+<dialog id="importer"><div class="dlg">
+  <h2>Import from TCGplayer</h2>
+  <p class="small" id="impSummary" style="margin:0"></p>
+  <div class="scrollbox" id="impList"></div>
+  <label class="field"><span>Put new cards in</span><input id="impLoc" list="locList" autocomplete="off"></label>
+  <div class="dlgfoot">
+    <button class="btn" type="button" id="impCancel">Cancel</button>
+    <button class="btn" type="button" id="impPrices">Update prices only</button>
+    <button class="btn primary" type="button" id="impAdd">Add to library</button>
+  </div>
+</div></dialog>
+
+<datalist id="nameList"></datalist><datalist id="setList"></datalist><datalist id="locList"></datalist><datalist id="deckList"></datalist>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

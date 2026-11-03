@@ -27,6 +27,10 @@ Each of these services has its own terms of use, which apply to the data and ima
 
 This project is being built with the help of [Claude](https://claude.ai), an AI assistant made by [Anthropic](https://www.anthropic.com). Much of the code, design and documentation was written by Claude under my direction, and I review and test the changes.
 
+## License
+
+The code in this repository is licensed under the [GNU General Public License v3.0](LICENSE). The license covers only the code written for this project. It does not cover Pokémon names, card images, artwork, logos, prices or other data from the sources above, which remain the property of their owners and are subject to their own terms. The fonts are licensed separately under the SIL Open Font License.
+
 ## Legal notice
 
 This is an unofficial fan project, made for personal, non-commercial use. It is not produced, endorsed, supported or affiliated with Nintendo, Creatures Inc., GAME FREAK inc., The Pokémon Company, The Pokémon Company International, TCGplayer, or any of the other services listed above.

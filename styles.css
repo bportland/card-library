@@ -115,7 +115,7 @@ dialog::backdrop{background:rgb(10 12 30 / .55)}
 .picks:empty{display:none}
 .pick{all:unset;box-sizing:border-box;display:grid;gap:3px;align-content:start;padding:5px;border:1px solid var(--line);border-radius:6px;background:var(--surface);cursor:pointer;font-size:.8rem;line-height:1.2;overflow-wrap:anywhere}
 .pick:hover,.pick:focus-visible{border-color:var(--link);outline:none}
-.pick img{width:100%;aspect-ratio:5/7;object-fit:cover;border-radius:4px;background:var(--sunk)}
+.pick img,.pick .noimg{width:100%;aspect-ratio:5/7;object-fit:cover;border-radius:4px;background:var(--sunk)}
 .pick .nm{font-weight:700}
 #lookupDone{margin:0}
 .linkbtn{all:unset;cursor:pointer;color:var(--link);font-weight:700;text-decoration:underline}

@@ -50,7 +50,8 @@ function tcgdexImage(id,size='low',lang='en'){
   if(!id)return '';
   const i=id.lastIndexOf('-'),set=id.slice(0,i),code=LIMITLESS_ART[set];
   if(code&&lang==='en')return `https://limitlesstcg.nyc3.cdn.digitaloceanspaces.com/tpci/${code}/${code}_${id.slice(i+1).padStart(3,'0')}_R_EN_${size==='high'?'LG':'SM'}.png`;
-  let serie=set.match(/^[a-z]+/i)[0];
+  let serie=set.match(/^[a-z]+/i)?.[0];
+  if(!serie)return '';// sets such as 2018sm (McDonald's) have no art and no series prefix
   if(/^[a-z]+p$/.test(set))serie=serie.slice(0,-1);// promo sets such as mep live under their series
   return `https://assets.tcgdex.net/${lang}/${serie}/${set}/${id.slice(i+1)}/${size}.webp`;
 }
@@ -491,8 +492,8 @@ async function runLookup(){
     if(!list.length){lookupMsg('No cards found. Check the spelling, or try a shorter name.');return}
     const max=120;
     lookupMsg(list.length>max?`Showing the newest ${max} of ${list.length} cards. Choose a set to narrow it down.`:`${list.length} card${list.length===1?'':'s'} found. Tap the one you have.`);
-    R.innerHTML=list.slice(0,max).map(x=>`<button type="button" class="pick" data-pick="${esc(x.id)}"><img loading="lazy" src="${esc(x.image?x.image+'/low.webp':tcgdexImage(x.id))}" alt="">
-      <span class="nm">${esc(x.name)}</span><span class="small muted">${esc(names.get(setOf(x.id)))} · ${esc(x.localId)}</span></button>`).join('');
+    R.innerHTML=list.slice(0,max).map(x=>{const img=x.image?x.image+'/low.webp':tcgdexImage(x.id);return `<button type="button" class="pick" data-pick="${esc(x.id)}">${img?`<img loading="lazy" src="${esc(img)}" alt="">`:'<span class="noimg"></span>'}
+      <span class="nm">${esc(x.name)}</span><span class="small muted">${esc(names.get(setOf(x.id)))} · ${esc(x.localId)}</span></button>`}).join('');
   }catch{lookupMsg('Card search is unavailable right now. Check your connection and try again.')}
 }
 async function pickCard(id){

@@ -172,14 +172,20 @@ function rarityFrom(r){
   if(!r||r==='None')return '';
   return RARITIES.find(x=>x.toLowerCase()===r.toLowerCase())||(/^rare/i.test(r)?'Rare':'Other');
 }
+// TCGdex gives energy cards no type, and marks some special energies (Growing Grass Energy) as basic,
+// so the type comes from the name, or from the card text ("provides {G} Energy")
+const ENERGY_WORDS='Grass|Fire|Water|Lightning|Psychic|Fighting|Darkness|Dark|Metal|Fairy|Dragon';
+const ENERGY_LETTER={G:'Grass',R:'Fire',W:'Water',L:'Lightning',P:'Psychic',F:'Fighting',D:'Dark',M:'Metal',C:'Colorless',Y:'Fairy',N:'Dragon'};
+const energyName=w=>w==='Darkness'?'Dark':w;
+const typedSpecial=name=>String(name||'').match(new RegExp(`^(?!Basic )\\S+ (${ENERGY_WORDS}) Energy$`))?.[1];
 function fromTcgdex(d,abbr){
   const total=d.set?.cardCount?.official||0;
+  const basic=d.category==='Energy'&&d.energyType!=='Special'&&d.name.match(new RegExp(`^(?:Basic )?(${ENERGY_WORDS}) Energy$`))?.[1];
   const detail=d.category==='Pokemon'?`${(d.stage||'').replace(/(\d)/,' $1')} Pokemon`
     :d.category==='Trainer'?DETAILS.find(x=>(d.trainerType||'').includes(x))
-    :d.category==='Energy'?(d.energyType==='Special'?'Special Energy':'Basic Energy'):'';
-  // Basic energies carry no type, so read it from the name and name them the way the library does ("Basic Dark Energy")
-  const basic=detail==='Basic Energy'&&d.name.match(/^(?:Basic )?(\w+) Energy$/)?.[1];
-  const energy=({Darkness:'Dark'})[basic||d.types?.[0]]||basic||d.types?.[0]||'';
+    :d.category==='Energy'?(basic?'Basic Energy':'Special Energy'):'';
+  const word=basic||(d.category==='Energy'&&typedSpecial(d.name)),letter=d.category==='Energy'&&(d.effect||'').match(/provides (?:\d+ )?\{([A-Z])\} Energy/)?.[1];
+  const energy=word?energyName(word):letter?ENERGY_LETTER[letter]:energyName(d.types?.[0]||'');
   const print=d.variants&&!d.variants.normal&&d.variants.holo?'Holofoil':'Normal';
   return {name:basic&&ENERGIES.includes(energy)?`Basic ${energy} Energy`:d.name,type:TYPES.includes(d.category)?d.category:'',detail:DETAILS.includes(detail)?detail:'',energy:ENERGIES.includes(energy)?energy:'',
     set:abbr,num:total?`${d.localId}/${String(total).padStart(3,'0')}`:d.localId,rarity:rarityFrom(d.rarity),print,tcg:d.id,img:d.image||''};
@@ -680,6 +686,17 @@ async function updatePrices(quiet){
   }catch(e){banner('');if(!quiet)toast(failMsg(e))}
   btn.disabled=false;
 }
+// Special energies added through card search before the type fix were saved as Basic Energy with no type
+let energyChecked=false;
+async function fixSpecialEnergies(){
+  if(energyChecked||!S.ready||!S.canWrite)return;
+  energyChecked=true;
+  const ops=S.cards.filter(c=>{const w=typedSpecial(c.name);return w&&(c.type!=='Energy'||c.detail!=='Special Energy'||c.energy!==energyName(w))})
+    .map(c=>({path:'cards/'+c.id,update:{type:'Energy',detail:'Special Energy',energy:energyName(typedSpecial(c.name))}}));
+  if(!ops.length)return;
+  const text=`Set the energy type on ${ops.length} special energ${ops.length===1?'y':'ies'}`;
+  try{const id=await act(text,ops);toast(text,undoAction(id))}catch{}
+}
 let autoPriced=false;
 function maybeAutoPrices(){
   if(autoPriced||!S.ready||!S.metaReady||!S.canWrite||!S.cards.length)return;
@@ -786,7 +803,7 @@ function startData(){
   stops.push(db.collection('cards').onSnapshot(snap=>{
     S.cards=snap.docs.map(d=>({id:d.id,count:1,...d.data()}));
     S.byId=new Map(S.cards.map(c=>[c.id,c]));
-    if(!snap.metadata.fromCache){clearTimeout(slow);if($('banner').textContent.startsWith('Your library is taking'))banner('');S.ready=true;maybeAutoPrices()}
+    if(!snap.metadata.fromCache){clearTimeout(slow);if($('banner').textContent.startsWith('Your library is taking'))banner('');S.ready=true;maybeAutoPrices();fixSpecialEnergies()}
     queueRender();
   },dataError));
   stops.push(db.collection('checklists').onSnapshot(snap=>{S.checklists=Object.fromEntries(snap.docs.map(d=>[d.id,d.data()]));queueRender()},dataError));

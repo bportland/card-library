@@ -112,7 +112,7 @@
     <label class="field"><span>Printing</span><select id="e-print"></select></label>
     <label class="field"><span>Pattern</span><select id="e-pattern"></select></label>
     <label class="field"><span>Stamp</span><select id="e-stamp"></select></label>
-    <label class="field"><span>Location</span><input id="e-loc" list="locList" required autocomplete="off"></label>
+    <label class="field"><span>Location</span><input id="e-loc" list="locList" required pattern=".*\S.*" title="Choose where this card is kept" autocomplete="off"></label>
     <label class="field"><span>Deck</span><input id="e-deck" list="deckList" autocomplete="off"></label>
     <label class="field"><span>TCG market price ($)</span><input id="e-price" type="number" min="0" step="0.01" inputmode="decimal"></label>
     <label class="field"><span>Notes</span><input id="e-notes" autocomplete="off"></label>

@@ -441,7 +441,9 @@ function openEditor(c){
   const set=(id,v)=>$(id).value=v??'';
   fillSelect($('e-type'),TYPES,'');fillSelect($('e-detail'),DETAILS,'');fillSelect($('e-energy'),ENERGIES,'None');fillSelect($('e-rarity'),RARITIES,'Not recorded');
   fillSelect($('e-print'),PRINTINGS);fillSelect($('e-pattern'),PATTERNS,'None');fillSelect($('e-stamp'),STAMPS,'None');
-  const v=c||{count:1,print:'Normal',loc:'Box 2 (Red)'};
+  // A new card goes where the library is filtered to, otherwise the location starts blank and must be chosen
+  const lo=$('f-loc').value,deck=lo.startsWith('deck:');
+  const v=c||{count:1,print:'Normal',loc:deck?'In a Deck':lo,deck:deck?lo.slice(5):''};
   for(const k of ['name','type','detail','energy','count','set','num','rarity','print','pattern','stamp','loc','deck','price','notes'])set('e-'+k,v[k]);
   if(!c)$('e-print').value='Normal';
   $('lookup').hidden=!S.canWrite;$('lookup').open=!c;

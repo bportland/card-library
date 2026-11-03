@@ -33,7 +33,7 @@ function parseTcgRow(r){
     qty:Math.max(1,parseInt(r['Add to Quantity'],10)||parseInt(r['Total Quantity'],10)||1),price:Number.isFinite(price)?price:null};
 }
 // TCGdex set id, printed total and language (English when left out) for each set abbreviation. Used for card images and prices.
-const TCGDEX={ASC:['me02.5','217'],BLK:['sv10.5b','086'],CRI:['me04','086'],CRZ:['swsh12.5','159'],DRI:['sv10','182'],JTG:['sv09','159'],LOR:['swsh11','196'],MEG:['me01','132'],MEP:['mep',''],PAF:['sv04.5','091'],PAL:['sv02','193'],PAR:['sv04','182'],PBL:['me05','084'],PFL:['me02','094'],POR:['me03','088'],PRE:['sv08.5','131'],SCR:['sv07','142'],SFA:['sv06.5','064'],SSP:['sv08','191'],SVI:['sv01','198'],TEF:['sv05','162'],TWM:['sv06','167'],WHT:['sv10.5w','086'],sv8a:['SV8a','187','ja']};
+const TCGDEX={ASC:['me02.5','217'],BLK:['sv10.5b','086'],CRI:['me04','086'],CRZ:['swsh12.5','159'],DRI:['sv10','182'],JTG:['sv09','159'],LOR:['swsh11','196'],MEE:['mee',''],MEG:['me01','132'],MEP:['mep',''],PAF:['sv04.5','091'],PAL:['sv02','193'],PAR:['sv04','182'],PBL:['me05','084'],PFL:['me02','094'],POR:['me03','088'],PRE:['sv08.5','131'],SCR:['sv07','142'],SFA:['sv06.5','064'],SSP:['sv08','191'],SVE:['sve',''],SVI:['sv01','198'],TEF:['sv05','162'],TWM:['sv06','167'],WHT:['sv10.5w','086'],sv8a:['SV8a','187','ja']};
 const VARIANT={Normal:'normal',Holofoil:'holofoil','Reverse Holofoil':'reverse-holofoil'};
 // Cards found through card search carry their own TCGdex id and image, so they work for any set.
 function tcgdexId(c){
@@ -44,9 +44,12 @@ function tcgdexId(c){
 }
 const tcgdexLang=c=>c.lang||(!c.tcg&&TCGDEX[c.set]?.[2])||'en';
 const setOf=id=>id.slice(0,id.lastIndexOf('-'));
+// TCGdex has no art for the basic energy sets, so those images come from Limitless TCG
+const LIMITLESS_ART={mee:'MEE',sve:'SVE'};
 function tcgdexImage(id,size='low',lang='en'){
   if(!id)return '';
-  const i=id.lastIndexOf('-'),set=id.slice(0,i);
+  const i=id.lastIndexOf('-'),set=id.slice(0,i),code=LIMITLESS_ART[set];
+  if(code&&lang==='en')return `https://limitlesstcg.nyc3.cdn.digitaloceanspaces.com/tpci/${code}/${code}_${id.slice(i+1).padStart(3,'0')}_R_EN_${size==='high'?'LG':'SM'}.png`;
   let serie=set.match(/^[a-z]+/i)[0];
   if(/^[a-z]+p$/.test(set))serie=serie.slice(0,-1);// promo sets such as mep live under their series
   return `https://assets.tcgdex.net/${lang}/${serie}/${set}/${id.slice(i+1)}/${size}.webp`;
@@ -154,9 +157,11 @@ function fromTcgdex(d,abbr){
   const detail=d.category==='Pokemon'?`${(d.stage||'').replace(/(\d)/,' $1')} Pokemon`
     :d.category==='Trainer'?DETAILS.find(x=>(d.trainerType||'').includes(x))
     :d.category==='Energy'?(d.energyType==='Special'?'Special Energy':'Basic Energy'):'';
-  const energy=({Darkness:'Dark'})[d.types?.[0]]||d.types?.[0]||'';
+  // Basic energies carry no type, so read it from the name and name them the way the library does ("Basic Dark Energy")
+  const basic=detail==='Basic Energy'&&d.name.match(/^(?:Basic )?(\w+) Energy$/)?.[1];
+  const energy=({Darkness:'Dark'})[basic||d.types?.[0]]||basic||d.types?.[0]||'';
   const print=d.variants&&!d.variants.normal&&d.variants.holo?'Holofoil':'Normal';
-  return {name:d.name,type:TYPES.includes(d.category)?d.category:'',detail:DETAILS.includes(detail)?detail:'',energy:ENERGIES.includes(energy)?energy:'',
+  return {name:basic&&ENERGIES.includes(energy)?`Basic ${energy} Energy`:d.name,type:TYPES.includes(d.category)?d.category:'',detail:DETAILS.includes(detail)?detail:'',energy:ENERGIES.includes(energy)?energy:'',
     set:abbr,num:total?`${d.localId}/${String(total).padStart(3,'0')}`:d.localId,rarity:rarityFrom(d.rarity),print,tcg:d.id,img:d.image||''};
 }
 

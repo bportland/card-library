@@ -33,8 +33,10 @@
   <nav aria-label="Views">
     <button class="tab" id="tab-library" data-view="library">Library</button>
     <button class="tab" id="tab-sets" data-view="sets">Sets</button>
-    <button class="tab" id="tab-checklist" data-view="checklist">Pitch Black</button>
+    <button class="tab" id="tab-checklist" data-view="checklist">Checklists</button>
     <button class="tab" id="tab-places" data-view="places">Boxes &amp; decks</button>
+    <button class="tab" id="tab-trade" data-view="trade">Trade pile</button>
+    <button class="tab" id="tab-activity" data-view="activity">Activity</button>
     <div class="actions">
       <button class="btn primary" id="addBtn" data-write>Add card</button>
       <button class="btn" id="importBtn" data-write>Import TCGplayer CSV</button>
@@ -52,7 +54,7 @@
       <label class="field"><span>Set</span><select id="f-set"></select></label>
       <label class="field"><span>Location</span><select id="f-loc"></select></label>
       <label class="field"><span>Show</span><select id="f-check">
-        <option value="">Everything</option><option value="special">Stamped or patterned</option><option value="review">Needs review</option>
+        <option value="">Everything</option><option value="special">Stamped or patterned</option><option value="review">Needs attention</option>
         <option value="noset">No set recorded</option><option value="priced">Has a price</option></select></label>
     </div>
     <div class="resultbar" style="margin-bottom:8px">
@@ -63,6 +65,7 @@
           <option value="name">Name</option><option value="set">Set and number</option><option value="count">Most copies</option><option value="rarity">Rarest first</option><option value="price">Highest value</option></select></label>
       </span>
     </div>
+    <p class="note small" id="attnNote" hidden>These cards are missing details or have a number that does not fit their set. Open one and use <b>Look up this card</b> to fill in its set, number, rarity and picture.</p>
     <div class="ledger" id="ledger"></div>
     <div style="margin-top:10px;text-align:center"><button class="btn" id="more" hidden>Show more</button></div>
   </section>
@@ -70,6 +73,8 @@
   <section id="view-sets" hidden><div class="sets" id="sets"></div></section>
   <section id="view-checklist" hidden><div id="checklist" style="display:grid;gap:10px"></div></section>
   <section id="view-places" hidden><div id="places" style="display:grid;gap:12px"></div></section>
+  <section id="view-trade" hidden><div id="trade" style="display:grid;gap:10px"></div></section>
+  <section id="view-activity" hidden><div id="activity" style="display:grid;gap:10px"></div></section>
   <footer class="foot">
     <span class="muted small" id="who"></span>
     <button class="btn" id="exportBtn">Export CSV</button>
@@ -80,6 +85,17 @@
 
 <dialog id="editor"><form class="dlg" id="editForm" method="dialog">
   <h2 id="editTitle">Add card</h2>
+  <details class="lookup" id="lookup">
+    <summary id="lookupSum">Find the card</summary>
+    <div class="lookrow">
+      <label class="field"><span>Card name</span><input id="l-q" type="search" placeholder="e.g. Charizard ex" autocomplete="off" enterkeyhint="search"></label>
+      <label class="field"><span>Set</span><select id="l-set"><option value="">Any set</option></select></label>
+      <button class="btn" type="button" id="l-go">Search</button>
+    </div>
+    <p class="small muted" id="l-msg" hidden></p>
+    <div class="picks" id="l-results"></div>
+  </details>
+  <p class="small note" id="lookupDone" hidden></p>
   <img id="e-img" class="bigcard" alt="" hidden>
   <div class="grid2">
     <label class="field full"><span>Card name</span><input id="e-name" list="nameList" required autocomplete="off"></label>

@@ -98,3 +98,32 @@ dialog::backdrop{background:rgb(10 12 30 / .55)}
 .foot #who{margin-right:auto;overflow-wrap:anywhere}
 #gate{min-height:100dvh;display:grid;place-content:center;justify-items:center;gap:14px;padding-block:24px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));text-align:center}
 #gate p{margin:0;max-width:42ch}
+#toast{display:flex;gap:12px;align-items:center;width:max-content}
+#toast button{all:unset;cursor:pointer;font-weight:700;text-decoration:underline;color:inherit}
+/* card lookup in the editor */
+.lookup{border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--bg)}
+.lookup summary{cursor:pointer;font-weight:700}
+.lookup[open] summary{margin-bottom:10px}
+.lookrow{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) auto;gap:8px;align-items:end}
+@media (max-width:480px){.lookrow{grid-template-columns:minmax(0,1fr) auto}.lookrow .field:nth-child(2){grid-column:1/-1;grid-row:2}}
+#l-msg{margin:8px 0 0}
+.picks{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;max-height:340px;overflow:auto;margin-top:8px}
+.picks:empty{display:none}
+.pick{all:unset;box-sizing:border-box;display:grid;gap:3px;align-content:start;padding:5px;border:1px solid var(--line);border-radius:6px;background:var(--surface);cursor:pointer;font-size:.8rem;line-height:1.2;overflow-wrap:anywhere}
+.pick:hover,.pick:focus-visible{border-color:var(--accent);outline:none}
+.pick img{width:100%;aspect-ratio:5/7;object-fit:cover;border-radius:4px;background:var(--sunk)}
+.pick .nm{font-weight:700}
+#lookupDone{margin:0}
+.linkbtn{all:unset;cursor:pointer;color:var(--accent);font-weight:700;text-decoration:underline}
+/* checklists, decks, trade pile, activity */
+.ckbar{display:flex;flex-wrap:wrap;gap:8px;align-items:end}
+.ckbar .field{min-width:200px}.ckbar .grow{flex:1}
+.issues{margin:0;padding-left:18px;font-size:.86rem;color:var(--warn)}
+.ok{color:var(--good);font-weight:700}
+.field.inline{grid-auto-flow:column;align-items:center;gap:6px}
+.extra{font-size:.86rem;color:var(--muted);white-space:nowrap}.extra b{font:500 1.05rem var(--mono);color:var(--fg)}
+.arow{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:10px 12px;border-top:1px solid var(--line)}
+.arow:first-child{border-top:0}
+.atext{display:grid;gap:1px;min-width:0;overflow-wrap:anywhere}.atext .nm{font-weight:700}
+.arow.undone .nm{text-decoration:line-through;color:var(--muted)}
+.note.small{margin:0 0 8px}

@@ -32,25 +32,33 @@ function parseTcgRow(r){
   return {name,num:r['Number']||'',print:r['Printing']||'Normal',pattern,stamp,rarity:r['Rarity']||'',set,setName:r['Set Name']||'',
     qty:Math.max(1,parseInt(r['Add to Quantity'],10)||parseInt(r['Total Quantity'],10)||1),price:Number.isFinite(price)?price:null};
 }
-// TCGdex set id and printed total for each set abbreviation. Used for card images and prices.
-const TCGDEX={ASC:['me02.5','217'],BLK:['sv10.5b','086'],CRI:['me04','086'],CRZ:['swsh12.5','159'],DRI:['sv10','182'],JTG:['sv09','159'],LOR:['swsh11','196'],MEG:['me01','132'],MEP:['mep',''],PAF:['sv04.5','091'],PAL:['sv02','193'],PAR:['sv04','182'],PBL:['me05','084'],PFL:['me02','094'],POR:['me03','088'],PRE:['sv08.5','131'],SCR:['sv07','142'],SFA:['sv06.5','064'],SSP:['sv08','191'],SVI:['sv01','198'],TEF:['sv05','162'],TWM:['sv06','167'],WHT:['sv10.5w','086']};
+// TCGdex set id, printed total and language (English when left out) for each set abbreviation. Used for card images and prices.
+const TCGDEX={ASC:['me02.5','217'],BLK:['sv10.5b','086'],CRI:['me04','086'],CRZ:['swsh12.5','159'],DRI:['sv10','182'],JTG:['sv09','159'],LOR:['swsh11','196'],MEG:['me01','132'],MEP:['mep',''],PAF:['sv04.5','091'],PAL:['sv02','193'],PAR:['sv04','182'],PBL:['me05','084'],PFL:['me02','094'],POR:['me03','088'],PRE:['sv08.5','131'],SCR:['sv07','142'],SFA:['sv06.5','064'],SSP:['sv08','191'],SVI:['sv01','198'],TEF:['sv05','162'],TWM:['sv06','167'],WHT:['sv10.5w','086'],sv8a:['SV8a','187','ja']};
 const VARIANT={Normal:'normal',Holofoil:'holofoil','Reverse Holofoil':'reverse-holofoil'};
+// Cards found through card search carry their own TCGdex id and image, so they work for any set.
 function tcgdexId(c){
+  if(c.tcg)return c.tcg;
   const s=TCGDEX[c.set];if(!s||!c.num)return '';
   const[n,total='']=c.num.split('/');
   return s[1]&&total!==s[1]?'':`${s[0]}-${n}`;
 }
-function tcgdexImage(id,size='low'){
+const tcgdexLang=c=>c.lang||(!c.tcg&&TCGDEX[c.set]?.[2])||'en';
+const setOf=id=>id.slice(0,id.lastIndexOf('-'));
+function tcgdexImage(id,size='low',lang='en'){
   if(!id)return '';
   const i=id.lastIndexOf('-'),set=id.slice(0,i);
-  return `https://assets.tcgdex.net/en/${set.match(/^[a-z]+/)[0]}/${set}/${id.slice(i+1)}/${size}.webp`;
+  let serie=set.match(/^[a-z]+/i)[0];
+  if(/^[a-z]+p$/.test(set))serie=serie.slice(0,-1);// promo sets such as mep live under their series
+  return `https://assets.tcgdex.net/${lang}/${serie}/${set}/${id.slice(i+1)}/${size}.webp`;
 }
+const cardImage=(c,size='low')=>c.img?`${c.img}/${size}.webp`:tcgdexImage(tcgdexId(c),size,tcgdexLang(c));
 function marketPrice(tcgplayer,print){
   if(!tcgplayer)return null;
   const hit=tcgplayer[VARIANT[print]]?.marketPrice;
   if(hit!=null)return hit;
   return print==='Reverse Holofoil'?null:tcgplayer.normal?.marketPrice??tcgplayer.holofoil?.marketPrice??null;
 }
+const numKey=s=>String(s).replace(/^0+(?=\d)/,'');
 /*pure-end*/
 
 const TYPES=['Pokemon','Trainer','Energy'];
@@ -63,19 +71,28 @@ const STAMPS=['Play! Stamp','Set Logo Stamp'];
 const RARITIES=['Common','Uncommon','Rare','Double Rare','Ultra Rare','Illustration Rare','Special Illustration Rare','Hyper Rare','Mega Hyper Rare','Promo','ACE SPEC Rare','Other'];
 const RARITY_MARK={Common:'●',Uncommon:'◆',Rare:'★','Double Rare':'★★','Ultra Rare':'★★','Illustration Rare':'★','Special Illustration Rare':'★★','Hyper Rare':'★★★','Mega Hyper Rare':'✦','ACE SPEC Rare':'★',Promo:'P'};
 const NO_TOTAL=new Set(['MEP','UNK','Vintage']);
-const CK_RARITY={C:'Common',U:'Uncommon',R:'Rare',DR:'Double Rare',IR:'Illustration Rare',UR:'Ultra Rare',SIR:'Special Illustration Rare',MHR:'Mega Hyper Rare',RH:'Reverse Holos'};
-const PAGE=150;
+const CK_RARITY={C:'Common',U:'Uncommon',R:'Rare',DR:'Double Rare',IR:'Illustration Rare',UR:'Ultra Rare',SIR:'Special Illustration Rare',MHR:'Mega Hyper Rare',RH:'Reverse Holos',MAIN:'Main set',SECRET:'Secret rares'};
+const VIEWS=['library','sets','checklist','places','trade','activity'];
+const PAGE=150,PRICE_DAYS=7;
 
-const S={cards:[],byId:new Map(),checklists:{},seed:[],view:'library',limit:PAGE,canWrite:true,ready:false,ckFilter:'all',editing:null,pending:{},timers:{}};
+const stored=(k,d)=>{try{return localStorage.getItem(k)??d}catch{return d}};
+const store=(k,v)=>{try{localStorage.setItem(k,v)}catch{}};
+const S={cards:[],byId:new Map(),checklists:{},activity:[],meta:{},view:'library',limit:PAGE,canWrite:true,ready:false,metaReady:false,ckFilter:'all',ckSel:stored('ck',''),ckNew:false,keep:+stored('keep','1')||1,editing:null,lookup:null,me:'',pending:{},timers:{}};
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>'$'+Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const denom=c=>(c.num||'').split('/')[1]||'';
 const base=c=>(c.num||'').split('/')[0];
+const newId=()=>db.collection('cards').doc().id;
+const shortDate=iso=>new Date(iso).toLocaleDateString(undefined,{month:'short',day:'numeric'});
 
 let toastTimer;
-function toast(msg){const t=$('toast');t.textContent=msg;t.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.hidden=true,3500)}
+function toast(msg,action){
+  const t=$('toast');t.replaceChildren(msg);
+  if(action){const b=document.createElement('button');b.textContent=action.label;b.onclick=()=>{t.hidden=true;action.fn()};t.append(b)}
+  t.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.hidden=true,action?8000:3500);
+}
 function banner(msg){const b=$('banner');b.hidden=!msg;b.textContent=msg||''}
 
 async function retry(fn){
@@ -85,16 +102,68 @@ async function retry(fn){
       await sleep(800*(i+1)+Math.random()*400)}
   }
 }
-async function pool(items,fn,n=4,onDone){
-  let i=0,done=0;
-  await Promise.all(Array.from({length:Math.min(n,items.length)},async()=>{
-    while(i<items.length){const it=items[i++];await retry(()=>fn(it));onDone?.(++done)}
-  }));
-}
 function failMsg(e){return e?.code==='resource-exhausted'?'The free daily database limit has been reached. Try again tomorrow.':e?.code==='permission-denied'?'This account cannot change the library.':'That change was not saved. Check your connection and try again.'}
 function clean(o){const r={};for(const[k,v]of Object.entries(o))if(v!==''&&v!=null)r[k]=v;return r}
 
+/* activity: every change is written together with a log entry that holds what is needed to undo it */
+function prevDoc(path){
+  const[col,id]=path.split('/');
+  if(col==='cards'){const c=S.byId.get(id);if(!c)return null;const{id:_,...rest}=c;return rest}
+  if(col==='checklists'){const ck=S.checklists[id];return ck?structuredClone(ck):null}
+  return null;
+}
+async function act(text,ops,extra=[],more={}){
+  const undo=ops.map(o=>{const p=prevDoc(o.path);return p?{path:o.path,set:p}:{path:o.path,delete:true}}).reverse();
+  const id=newId();
+  await retry(()=>db.batch([...ops,...extra,{path:'activity/'+id,set:{at:new Date().toISOString(),by:S.me,text,undo,...more}}]));
+  return id;
+}
+const undoAction=id=>({label:'Undo',fn:()=>undoAct(id)});
+async function undoAct(id){
+  const i=S.activity.findIndex(a=>a.id===id),a=S.activity[i];
+  if(!a||a.undone||!a.undo?.length)return;
+  // A later change to the same card blocks this undo, unless that change was itself undone (the pair cancels out)
+  const paths=new Set(a.undo.map(o=>o.path)),newer=S.activity.slice(0,i),newerIds=new Set(newer.map(x=>x.id));
+  const later=newer.find(x=>!x.undone&&!(x.undoes&&newerIds.has(x.undoes))&&x.undo?.some(o=>paths.has(o.path)));
+  if(later){toast(`“${later.text}” changed the same card afterwards. Undo that first.`);return}
+  const extra=[{path:'activity/'+id,update:{undone:true}}];
+  if(a.undoes&&S.activity.some(x=>x.id===a.undoes))extra.push({path:'activity/'+a.undoes,update:{undone:false}});// redo
+  const text=a.text.startsWith('Undid: ')?a.text.replace('Undid: ','Redid: '):`Undid: ${a.text.replace(/^Redid: /,'')}`;
+  try{await act(text,a.undo,extra,{undoes:id});toast(text)}
+  catch(e){toast(failMsg(e))}
+}
+
+/* TCGdex */
+const API='https://api.tcgdex.net/v2/',apiCache=new Map();
+function api(path){
+  if(!apiCache.has(path))apiCache.set(path,fetch(API+path).then(r=>{if(!r.ok)throw new Error(r.status);return r.json()}).catch(e=>{apiCache.delete(path);throw e}));
+  return apiCache.get(path);
+}
+// Newest first, without TCG Pocket (the phone game) sets
+async function tcgSets(){
+  const all=await api('en/sets');
+  return all.filter(s=>!(s.logo||'').includes('/tcgp/')&&!/^([AB]\d|P-[AB])/.test(s.id)).reverse();
+}
+const abbrFor=(setId,info)=>Object.keys(TCGDEX).find(k=>TCGDEX[k][0]===setId)||info?.abbreviation?.official||setId.toUpperCase();
+function rarityFrom(r){
+  if(!r||r==='None')return '';
+  return RARITIES.find(x=>x.toLowerCase()===r.toLowerCase())||(/^rare/i.test(r)?'Rare':'Other');
+}
+function fromTcgdex(d,abbr){
+  const total=d.set?.cardCount?.official||0;
+  const detail=d.category==='Pokemon'?`${(d.stage||'').replace(/(\d)/,' $1')} Pokemon`
+    :d.category==='Trainer'?DETAILS.find(x=>(d.trainerType||'').includes(x))
+    :d.category==='Energy'?(d.energyType==='Special'?'Special Energy':'Basic Energy'):'';
+  const energy=({Darkness:'Dark'})[d.types?.[0]]||d.types?.[0]||'';
+  const print=d.variants&&!d.variants.normal&&d.variants.holo?'Holofoil':'Normal';
+  return {name:d.name,type:TYPES.includes(d.category)?d.category:'',detail:DETAILS.includes(detail)?detail:'',energy:ENERGIES.includes(energy)?energy:'',
+    set:abbr,num:total?`${d.localId}/${String(total).padStart(3,'0')}`:d.localId,rarity:rarityFrom(d.rarity),print,tcg:d.id,img:d.image||''};
+}
+
 /* derived data */
+function setLabel(abbr){
+  return SETS[abbr]||S.checklists[abbr]?.name||S.cards.find(c=>c.set===abbr&&c.setName)?.setName||abbr;
+}
 function totalsDenom(){
   const m={};
   for(const c of S.cards){const d=denom(c);if(!c.set||!d)continue;(m[c.set]??={})[d]=(m[c.set][d]||0)+1}
@@ -104,7 +173,7 @@ function totalsDenom(){
 function reviewReason(c,td){
   if(!c.type)return 'Card type missing';
   if(c.set&&!c.num)return 'Card number missing';
-  if(c.num&&!c.set)return 'Set missing';
+  if(!c.set&&c.detail!=='Basic Energy')return 'Set missing';
   if(c.set==='UNK')return 'Set unknown';
   if(c.set&&!c.rarity)return 'Rarity missing';
   if(c.set&&!NO_TOTAL.has(c.set)&&denom(c)&&denom(c)!==td[c.set])return 'Number does not fit this set';
@@ -137,13 +206,13 @@ let renderQueued=false;
 function queueRender(){if(renderQueued)return;renderQueued=true;setTimeout(()=>{renderQueued=false;render()},120)}
 function render(){
   renderTally();renderLists();
-  for(const v of ['library','sets','checklist','places']){$('view-'+v).hidden=S.view!==v;$('tab-'+v).setAttribute('aria-selected',S.view===v)}
-  ({library:renderLibrary,sets:renderSets,checklist:renderChecklist,places:renderPlaces})[S.view]();
+  for(const v of VIEWS){$('view-'+v).hidden=S.view!==v;$('tab-'+v).setAttribute('aria-selected',S.view===v)}
+  ({library:renderLibrary,sets:renderSets,checklist:renderChecklist,places:renderPlaces,trade:renderTrade,activity:renderActivity})[S.view]();
 }
 function renderTally(){
   const copies=S.cards.reduce((n,c)=>n+displayCount(c),0),val=S.cards.reduce((n,c)=>n+(c.price||0)*displayCount(c),0),priced=S.cards.filter(c=>c.price!=null).length;
-  const sets=new Set(S.cards.map(c=>c.set).filter(Boolean)).size;
-  $('tally').innerHTML=[[copies.toLocaleString(),'cards'],[S.cards.length.toLocaleString(),'entries'],[sets,'sets'],[priced?money(val):'—',priced?`value, ${priced} priced`:'value, none priced']]
+  const sets=new Set(S.cards.map(c=>c.set).filter(Boolean)).size,asOf=S.meta.prices?.at;
+  $('tally').innerHTML=[[copies.toLocaleString(),'cards'],[S.cards.length.toLocaleString(),'entries'],[sets,'sets'],[priced?money(val):'—',priced?(asOf?`value as of ${shortDate(asOf)}`:`value, ${priced} priced`):'value, none priced']]
     .map(([b,s])=>`<div><b>${esc(b)}</b><span>${esc(s)}</span></div>`).join('');
 }
 function fillSelect(el,opts,placeholder){
@@ -154,14 +223,18 @@ function fillSelect(el,opts,placeholder){
 const allLocs=()=>[...new Set([...LOCATIONS,...S.cards.map(c=>c.loc).filter(Boolean)])];
 const allDecks=()=>[...new Set(S.cards.map(c=>c.deck).filter(Boolean))].sort();
 function renderLists(){
-  const sets=[...new Set(S.cards.map(c=>c.set).filter(Boolean))].sort((a,b)=>(SETS[a]||a).localeCompare(SETS[b]||b));
+  const sets=[...new Set(S.cards.map(c=>c.set).filter(Boolean))].sort((a,b)=>setLabel(a).localeCompare(setLabel(b)));
   fillSelect($('f-type'),TYPES,'All types');fillSelect($('f-energy'),ENERGIES,'All energy');
-  fillSelect($('f-set'),sets.map(s=>[s,`${SETS[s]||s} (${s})`]),'All sets');
+  fillSelect($('f-set'),sets.map(s=>[s,`${setLabel(s)} (${s})`]),'All sets');
   fillSelect($('f-loc'),[...allLocs().filter(l=>S.cards.some(c=>c.loc===l)),...allDecks().map(d=>['deck:'+d,'Deck: '+d])],'All locations');
+  const td=totalsDenom();
+  $('f-check').querySelector('[value="review"]').textContent=`Needs attention (${S.cards.filter(c=>reviewReason(c,td)).length})`;
   const dl=(id,vals)=>$(id).innerHTML=vals.map(v=>`<option value="${esc(v)}">`).join('');
   dl('nameList',[...new Set(S.cards.map(c=>c.name))].sort());dl('setList',[...new Set([...sets,...Object.keys(SETS)])]);dl('locList',allLocs());dl('deckList',allDecks());
 }
 function rarityMark(r){const m=RARITY_MARK[r];return m?`<span class="stars${r==='ACE SPEC Rare'?' ace':''}" aria-hidden="true">${m}</span> `:''}
+const pipAttr=c=>c.energy?`style="--e:var(--e-${esc(c.energy.toLowerCase())})" title="${esc(c.energy)}"`:'';
+const thumbHTML=c=>{const img=cardImage(c);return `<span class="thumb">${img?`<img loading="lazy" src="${esc(img)}" alt="">`:''}</span>`};
 function rowHTML(c,td){
   const bits=[];
   if(c.set||c.num)bits.push(`<span class="mono">${esc([c.set,c.num].filter(Boolean).join(' '))}</span>`);
@@ -174,10 +247,8 @@ function rowHTML(c,td){
   if(c.notes)bits.push(`<span>${esc(c.notes)}</span>`);
   const why=reviewReason(c,td);if(why)bits.push(`<span class="tag warn">${esc(why)}</span>`);
   if(c.price!=null)bits.push(`<span class="price">${money(c.price)}</span>`);
-  const pip=c.energy?`style="--e:var(--e-${esc(c.energy.toLowerCase())})" title="${esc(c.energy)}"`:'';
   const dis=S.canWrite?'':' disabled';
-  const img=tcgdexImage(tcgdexId(c));
-  return `<div class="row"><span class="pip" ${pip}></span><span class="thumb">${img?`<img loading="lazy" src="${esc(img)}" alt="">`:''}</span>
+  return `<div class="row"><span class="pip" ${pipAttr(c)}></span>${thumbHTML(c)}
     <button class="open" data-open="${esc(c.id)}"><span class="nm">${esc(c.name)}</span><span class="meta">${bits.join('')}</span></button>
     <div class="stepper"><button data-step="-1" data-id="${esc(c.id)}" aria-label="Remove one ${esc(c.name)}"${dis}>−</button><output id="n-${esc(c.id)}">${displayCount(c)}</output><button data-step="1" data-id="${esc(c.id)}" aria-label="Add one ${esc(c.name)}"${dis}>+</button></div></div>`;
 }
@@ -186,6 +257,7 @@ function renderLibrary(){
   $('resultCount').textContent=S.ready||rows.length?`${rows.length.toLocaleString()} entries, ${copies.toLocaleString()} cards`:'';
   const active=['f-q','f-type','f-energy','f-set','f-loc','f-check'].some(i=>$(i).value);
   $('clearFilters').hidden=!active;
+  $('attnNote').hidden=$('f-check').value!=='review';
   const L=$('ledger');
   if(!rows.length){
     const empty=S.ready&&!S.cards.length;
@@ -201,45 +273,149 @@ function renderSets(){
   $('sets').innerHTML=list.map(e=>{
     const total=NO_TOTAL.has(e.set)?0:parseInt(td[e.set],10)||0;
     const within=total?[...e.nums].filter(n=>parseInt(n,10)<=total).length:0,pct=total?Math.min(100,within/total*100):0;
-    return `<button class="set" data-set="${esc(e.set)}"><span class="top"><h3>${esc(SETS[e.set]||e.set)}</h3><span class="mono small muted">${esc(e.set)}</span></span>
-      ${total?`<span class="bar"><i style="width:${pct.toFixed(1)}%"></i></span><span class="small muted">${within} of ${total} set numbers, ${e.copies} cards</span>`:`<span class="small muted">${e.nums.size} different cards, ${e.copies} copies</span>`}</button>`}).join('')||'<p class="note">Sets appear here once your cards load.</p>';
+    return `<button class="set" data-set="${esc(e.set)}"><span class="top"><h3>${esc(setLabel(e.set))}</h3><span class="mono small muted">${esc(e.set)}</span></span>
+      ${total?`<span class="bar"><i style="width:${pct.toFixed(1)}%"></i></span><span class="small muted">${within} of ${total} set numbers, ${e.copies} cards${S.checklists[e.set]?', has a checklist':''}</span>`:`<span class="small muted">${e.nums.size} different cards, ${e.copies} copies</span>`}</button>`}).join('')||'<p class="note">Sets appear here once your cards load.</p>';
 }
+
+/* checklists */
+const ckList=()=>Object.entries(S.checklists).map(([id,ck])=>({...ck,id})).sort((a,b)=>a.name.localeCompare(b.name));
+function currentCk(){const l=ckList();return l.find(x=>x.id===S.ckSel)||l[0]}
 function ckState(ck){
-  const own=new Map();
-  const total=ck.printed||'';
-  for(const c of S.cards){if(c.set!==ck.code||denom(c)!==total)continue;
-    const k=base(c)+(c.print==='Reverse Holofoil'?' RH':'');own.set(k,(own.get(k)||0)+displayCount(c))}
+  const own=new Map(),rh=ck.cards.some(x=>x.id.endsWith(' RH'));
+  for(const c of S.cards){
+    const hit=ck.tcg&&c.tcg?setOf(c.tcg)===ck.tcg:c.set===ck.code&&denom(c)===(ck.printed||'');
+    if(!hit)continue;
+    const k=numKey(base(c))+(rh&&c.print==='Reverse Holofoil'?' RH':'');own.set(k,(own.get(k)||0)+displayCount(c))}
   return own;
 }
+function pocketImage(ck,x){
+  if(x.img)return x.img+'/low.webp';
+  const s=TCGDEX[ck.code];
+  return tcgdexImage(`${s?.[0]||ck.tcg}-${x.id.split(' ')[0]}`,'low',ck.lang||s?.[2]||'en');
+}
+function ownedSetIds(){
+  const ids=new Set();
+  for(const c of S.cards){const id=tcgdexId(c);if(id&&tcgdexLang(c)==='en')ids.add(setOf(id))}
+  return ids;
+}
+async function fillNewChecklistSets(){
+  try{
+    const sets=await tcgSets(),sel=$('ckNewSet');if(!sel)return;
+    const own=ownedSetIds(),opt=s=>`<option value="${esc(s.id)}">${esc(s.name)}${s.cardCount?.official?` (${s.cardCount.official} cards)`:''}</option>`;
+    sel.innerHTML=`<optgroup label="Sets you have cards from">${sets.filter(s=>own.has(s.id)).map(opt).join('')}</optgroup><optgroup label="All sets, newest first">${sets.filter(s=>!own.has(s.id)).map(opt).join('')}</optgroup>`;
+    if(S.ckNewVal)sel.value=S.ckNewVal;
+  }catch{const sel=$('ckNewSet');if(sel)sel.innerHTML='<option value="">Set list unavailable. Check your connection.</option>'}
+}
 function renderChecklist(){
-  const el=$('checklist'),ck=S.checklists.PBL;
-  if(!ck){el.innerHTML='<p class="note">Your Pitch Black checklist will appear here once the library loads.</p>';return}
-  const own=ckState(ck),wish=new Set(ck.wish||[]);
-  const have=ck.cards.filter(x=>own.has(x.id)).length;
-  const groups=[...new Set(ck.cards.map(x=>x.r))];
-  const pass=x=>S.ckFilter==='all'||(S.ckFilter==='need'&&!own.has(x.id))||(S.ckFilter==='have'&&own.has(x.id))||(S.ckFilter==='wish'&&wish.has(x.id));
-  let html=`<div class="sectionhead"><div><h2>${esc(ck.name)} master set</h2><span class="small muted">${have} of ${ck.cards.length} collected, ${ck.cards.length-have} to go. Tap a faded card to wishlist it.</span></div>
+  const el=$('checklist'),list=ckList(),ck=currentCk();
+  let html=`<div class="ckbar">${list.length?`<label class="field"><span>Checklist</span><select id="ckSel">${list.map(x=>`<option value="${esc(x.id)}"${x.id===ck.id?' selected':''}>${esc(x.name)}</option>`).join('')}</select></label>`:''}
+    ${S.canWrite&&!S.ckNew?'<button class="btn" id="ckNew">New checklist</button>':''}${S.canWrite&&ck?'<button class="btn danger" id="ckRemove">Remove checklist</button>':''}</div>`;
+  if(S.ckNew)html+=`<div class="ckbar"><label class="field grow"><span>Set to collect</span><select id="ckNewSet"><option value="">Loading sets…</option></select></label>
+    <button class="btn primary" id="ckCreate">Start checklist</button><button class="btn" id="ckCancel">Cancel</button></div>`;
+  if(!ck){
+    el.innerHTML=html+`<p class="note">${S.ready?'No checklists yet. Use New checklist to pick a set and see which cards you still need.':'Your checklists will appear here once the library loads.'}</p>`;
+    if(S.ckNew)fillNewChecklistSets();return;
+  }
+  const own=ckState(ck),wish=new Set(ck.wish||[]),have=ck.cards.filter(x=>own.has(numKey(x.id))).length;
+  const printed=parseInt(ck.printed,10)||0,grp=x=>x.r||(!printed||parseInt(x.id,10)<=printed?'MAIN':'SECRET');
+  const groups=[...new Set(ck.cards.map(grp))];
+  const pass=x=>{const h=own.has(numKey(x.id));return S.ckFilter==='all'||(S.ckFilter==='need'&&!h)||(S.ckFilter==='have'&&h)||(S.ckFilter==='wish'&&wish.has(x.id))};
+  html+=`<div class="sectionhead"><div><h2>${esc(ck.name)} master set</h2><span class="small muted">${have} of ${ck.cards.length} collected, ${ck.cards.length-have} to go. Tap a faded card to wishlist it.</span></div>
     <div class="seg">${[['all','All'],['need','Need'],['have','Have'],['wish','Wishlist']].map(([k,l])=>`<button data-ck="${k}" aria-pressed="${S.ckFilter===k}">${l}</button>`).join('')}</div></div>
     <div class="bar"><i style="width:${(have/ck.cards.length*100).toFixed(1)}%"></i></div>`;
   for(const g of groups){
-    const all=ck.cards.filter(x=>x.r===g),show=all.filter(pass);if(!show.length)continue;
-    const got=all.filter(x=>own.has(x.id)).length;
+    const all=ck.cards.filter(x=>grp(x)===g),show=all.filter(pass);if(!show.length)continue;
+    const got=all.filter(x=>own.has(numKey(x.id))).length;
     html+=`<div class="sectionhead"><h3>${esc(CK_RARITY[g]||g)}</h3><span class="small muted mono">${got}/${all.length}</span></div><div class="page">`+show.map(x=>{
-      const h=own.has(x.id),w=wish.has(x.id);
+      const n=own.get(numKey(x.id)),h=!!n,w=wish.has(x.id);
       return `<button class="pocket${h?' have':w?' wish':''}" data-wish="${esc(x.id)}" aria-label="${esc(x.name)}, number ${esc(x.id)}, ${h?'collected':w?'on wishlist':'needed'}"${h||!S.canWrite?' aria-disabled="true"':''}>
-        <img loading="lazy" src="${esc(tcgdexImage(`${TCGDEX[ck.code][0]}-${x.id.split(' ')[0]}`))}" alt=""><span class="n"><span>${esc(x.id)}</span><span>${h?'×'+own.get(x.id):w?'★':''}</span></span><span>${esc(x.name)}</span></button>`}).join('')+'</div>';
+        <img loading="lazy" src="${esc(pocketImage(ck,x))}" alt=""><span class="n"><span>${esc(x.id)}</span><span>${h?'×'+n:w?'★':''}</span></span><span>${esc(x.name)}</span></button>`}).join('')+'</div>';
   }
   el.innerHTML=html;
+  if(S.ckNew)fillNewChecklistSets();
+}
+async function createChecklist(){
+  const setId=$('ckNewSet')?.value;if(!setId)return;
+  $('ckCreate').disabled=true;
+  try{
+    const info=await api('en/sets/'+encodeURIComponent(setId)),code=abbrFor(setId,info);
+    S.ckNew=false;S.ckNewVal='';S.ckSel=code;store('ck',code);
+    if(S.checklists[code]){renderChecklist();return}
+    const official=info.cardCount?.official||0;
+    const doc={code,name:info.name,printed:official?String(official).padStart(3,'0'):'',tcg:setId,cards:info.cards.map(x=>clean({id:x.localId,name:x.name,img:x.image})),wish:[]};
+    await act(`Started the ${info.name} checklist`,[{path:'checklists/'+code,set:doc}]);
+  }catch(e){toast(e?.code?failMsg(e):'That set could not be loaded. Check your connection and try again.');if($('ckCreate'))$('ckCreate').disabled=false}
+}
+async function removeChecklist(btn){
+  if(!btn.dataset.armed){btn.dataset.armed='1';btn.textContent='Confirm remove';return}
+  const ck=currentCk();if(!ck)return;
+  try{const id=await act(`Removed the ${ck.name} checklist`,[{path:'checklists/'+ck.id,delete:true}]);toast(`Removed the ${ck.name} checklist`,undoAction(id))}
+  catch(e){toast(failMsg(e))}
+}
+
+/* boxes and decks */
+function deckIssues(cards){
+  const sum=f=>cards.filter(f).reduce((n,c)=>n+displayCount(c),0),out=[],n=sum(()=>true);
+  if(n!==60)out.push(n<60?`${60-n} short of 60`:`${n-60} over 60`);
+  const byName=new Map();
+  for(const c of cards){if(c.detail==='Basic Energy')continue;const k=norm(c.name),e=byName.get(k)||{name:c.name,n:0};e.n+=displayCount(c);byName.set(k,e)}
+  for(const e of byName.values())if(e.n>4)out.push(`${e.n} copies of ${e.name}, 4 allowed`);
+  const ace=sum(c=>c.rarity==='ACE SPEC Rare');if(ace>1)out.push(`${ace} ACE SPEC cards, 1 allowed`);
+  const rad=sum(c=>/^radiant /i.test(c.name));if(rad>1)out.push(`${rad} Radiant Pokémon, 1 allowed`);
+  if(!cards.some(c=>c.detail==='Basic Pokemon'))out.push('No Basic Pokémon');
+  return out;
 }
 function renderPlaces(){
   const sum=f=>S.cards.filter(f).reduce((n,c)=>n+displayCount(c),0);
   const locs=LOCATIONS.concat(allLocs().filter(l=>!LOCATIONS.includes(l)));
-  const tile=(key,name,sub,bar)=>`<button class="set" data-loc="${esc(key)}"><span class="top"><h3>${esc(name)}</h3></span>${bar??''}<span class="small muted">${esc(sub)}</span></button>`;
-  const decks=[...allDecks().map(d=>[d,sum(c=>c.loc==='In a Deck'&&c.deck===d)]),['',sum(c=>c.loc==='In a Deck'&&!c.deck)]].filter(([d,n])=>d||n);
+  const tile=(key,name,sub,extra)=>`<button class="set" data-loc="${esc(key)}"><span class="top"><h3>${esc(name)}</h3></span>${extra??''}<span class="small muted">${esc(sub)}</span></button>`;
+  const decks=allDecks(),loose=sum(c=>c.loc==='In a Deck'&&!c.deck);
   $('places').innerHTML=`<h2>Where your cards are</h2><div class="places">${locs.map(l=>{const n=sum(c=>c.loc===l);return tile(l,l,`${n.toLocaleString()} cards`)}).join('')}</div>
-    <h2 style="margin-top:8px">Decks</h2><div class="places">${decks.map(([d,n])=>d
-      ?tile('deck:'+d,d,`${n} of 60 cards`,`<span class="bar"><i style="width:${Math.min(100,n/60*100).toFixed(1)}%"></i></span>`)
-      :tile('deck:','Not assigned to a deck',`${n} cards marked In a Deck`)).join('')}</div>`;
+    <h2 style="margin-top:8px">Decks</h2><div class="places">${decks.map(d=>{
+      const cards=S.cards.filter(c=>c.loc==='In a Deck'&&c.deck===d),n=cards.reduce((t,c)=>t+displayCount(c),0),issues=deckIssues(cards);
+      const check=issues.length?`<ul class="issues">${issues.map(i=>`<li>${esc(i)}</li>`).join('')}</ul>`:'<span class="small ok">✓ Meets the deck rules</span>';
+      return tile('deck:'+d,d,`${n} of 60 cards`,`<span class="bar"><i style="width:${Math.min(100,n/60*100).toFixed(1)}%"></i></span>${check}`)}).join('')}
+    ${loose?tile('deck:','Not assigned to a deck',`${loose} cards marked In a Deck`):''}</div>
+    <p class="small muted">Deck checks cover 60 cards, at most 4 copies of a card name (Basic Energy excepted), one ACE SPEC, one Radiant Pokémon and at least one Basic Pokémon. They use the card type and rarity recorded in your library.</p>`;
+}
+
+/* trade pile */
+function tradeRows(){
+  const groups=new Map();
+  for(const c of S.cards){if(c.detail==='Basic Energy')continue;const k=[identity(c),c.set||'',c.stamp||''].join('|');(groups.get(k)||groups.set(k,[]).get(k)).push(c)}
+  const rows=[];
+  for(const g of groups.values()){
+    const inDecks=g.filter(c=>c.loc==='In a Deck').reduce((n,c)=>n+displayCount(c),0),spare=g.filter(c=>c.loc!=='In a Deck');
+    const extra=spare.reduce((n,c)=>n+displayCount(c),0)-Math.max(0,S.keep-inDecks);
+    if(extra>0)rows.push({c:[...spare].sort((a,b)=>b.count-a.count)[0],extra,inDecks,locs:[...new Set(spare.map(c=>c.loc).filter(Boolean))],price:g.find(c=>c.price!=null)?.price??null});
+  }
+  return rows.sort((a,b)=>(b.price||0)*b.extra-(a.price||0)*a.extra||b.extra-a.extra||a.c.name.localeCompare(b.c.name));
+}
+function renderTrade(){
+  const rows=tradeRows(),n=rows.reduce((t,r)=>t+r.extra,0),val=rows.reduce((t,r)=>t+(r.price||0)*r.extra,0);
+  $('trade').innerHTML=`<div class="sectionhead"><div><h2>Trade pile</h2><span class="small muted">${n.toLocaleString()} extra cards${val?`, worth about ${money(val)}`:''}</span></div>
+    <label class="field inline"><span>Keep</span><select id="keepSel">${[1,2,3,4].map(k=>`<option value="${k}"${k===S.keep?' selected':''}>${k} of each card</option>`).join('')}</select></label></div>
+    <p class="small muted">Extras are the copies outside your decks, after keeping the number you choose. A card your decks already use needs no spare. Basic Energy is left out.</p>
+    <div class="ledger">${rows.length?rows.slice(0,S.limit).map(({c,extra,inDecks,locs,price})=>`<div class="row"><span class="pip" ${pipAttr(c)}></span>${thumbHTML(c)}
+      <button class="open" data-open="${esc(c.id)}"><span class="nm">${esc(c.name)}</span><span class="meta">${c.set||c.num?`<span class="mono">${esc([c.set,c.num].filter(Boolean).join(' '))}</span>`:''}${c.rarity?`<span>${rarityMark(c.rarity)}${esc(c.rarity)}</span>`:''}${c.print&&c.print!=='Normal'?`<span>${esc(c.print)}</span>`:''}<span>${esc(locs.join(', '))}</span>${inDecks?`<span>${inDecks} in decks</span>`:''}${price!=null?`<span class="price">${money(price)} each</span>`:''}</span></button>
+      <span class="extra"><b>${extra}</b> extra</span></div>`).join(''):'<div class="row" style="grid-template-columns:1fr"><span class="muted">No extra copies at this setting.</span></div>'}</div>
+    ${rows.length>S.limit?`<div style="text-align:center"><button class="btn" id="tradeMore">Show more (${(rows.length-S.limit).toLocaleString()} left)</button></div>`:''}`;
+}
+
+/* activity */
+function ago(iso){
+  const t=new Date(iso),m=Math.round((Date.now()-t)/60000);
+  if(m<1)return 'just now';if(m<60)return `${m} min ago`;
+  const time=t.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}),day=new Date();day.setHours(0,0,0,0);
+  if(t>=day)return 'today at '+time;
+  if(t>=day-864e5)return 'yesterday at '+time;
+  return t.toLocaleDateString(undefined,{month:'short',day:'numeric',year:t.getFullYear()===day.getFullYear()?undefined:'numeric'})+' at '+time;
+}
+function renderActivity(){
+  $('activity').innerHTML=`<div class="sectionhead"><div><h2>Recent activity</h2><span class="small muted">The last 100 changes either of you made. Undo puts the cards back the way they were before that change.</span></div></div>
+    <div class="ledger">${S.activity.length?S.activity.map(a=>`<div class="arow${a.undone?' undone':''}"><div class="atext"><span class="nm">${esc(a.text)}</span>
+      <span class="meta"><span>${esc(a.by||'Someone')}</span><span>${esc(ago(a.at))}</span>${a.undone?'<span class="tag">Undone</span>':''}</span></div>
+      ${a.undo?.length&&!a.undone&&S.canWrite?`<button class="btn" data-undo="${esc(a.id)}">${a.text.startsWith('Undid: ')?'Redo':'Undo'}</button>`:''}</div>`).join(''):'<div class="arow"><span class="muted">Changes will be listed here as you make them.</span></div>'}</div>`;
 }
 
 /* editing */
@@ -249,39 +425,96 @@ function bump(id,d){
   const o=$('n-'+id);if(o)o.textContent=n;renderTally();
   clearTimeout(S.timers[id]);
   S.timers[id]=setTimeout(async()=>{
-    try{await retry(()=>db.doc('cards/'+id).update({count:n}))}catch(e){toast(failMsg(e))}
+    const cur=S.byId.get(id);
+    if(cur&&cur.count!==n){
+      try{await act(`${cur.name}: ${cur.count} → ${n} copies`,[{path:'cards/'+id,update:{count:n}}])}catch(e){toast(failMsg(e))}
+    }
     if(S.pending[id]===n)delete S.pending[id];
     queueRender();
-  },450);
+  },600);
 }
 function openEditor(c){
-  S.editing=c||null;
+  if($('editor').open)$('editor').close();
+  S.editing=c||null;S.lookup=null;
   $('editTitle').textContent=c?c.name:'Add card';
-  const big=c?tcgdexImage(tcgdexId(c),'high'):'';$('e-img').hidden=!big;if(big)$('e-img').src=big;else $('e-img').removeAttribute('src');
+  showBig(c?cardImage(c,'high'):'');
   const set=(id,v)=>$(id).value=v??'';
   fillSelect($('e-type'),TYPES,'');fillSelect($('e-detail'),DETAILS,'');fillSelect($('e-energy'),ENERGIES,'None');fillSelect($('e-rarity'),RARITIES,'Not recorded');
   fillSelect($('e-print'),PRINTINGS);fillSelect($('e-pattern'),PATTERNS,'None');fillSelect($('e-stamp'),STAMPS,'None');
   const v=c||{count:1,print:'Normal',loc:'Box 2 (Red)'};
   for(const k of ['name','type','detail','energy','count','set','num','rarity','print','pattern','stamp','loc','deck','price','notes'])set('e-'+k,v[k]);
   if(!c)$('e-print').value='Normal';
+  $('lookup').hidden=!S.canWrite;$('lookup').open=!c;
+  $('lookupSum').textContent=c?'Look up this card to fill in its set, number and picture':'Find the card';
+  $('l-q').value=c?c.name.replace(/\s*\((JPN|CHN)\)$/,''):'';$('l-results').innerHTML='';lookupMsg('');
+  fillLookupSets(c&&TCGDEX[c.set]&&!TCGDEX[c.set][2]?TCGDEX[c.set][0]:c?.tcg?setOf(c.tcg):'');
   $('delBtn').hidden=!c||!S.canWrite;$('delBtn').textContent='Delete';delete $('delBtn').dataset.armed;
   $('saveBtn').hidden=!S.canWrite;
   $('moveBox').hidden=!(c&&S.canWrite);
   if(c){$('m-count').value=1;$('m-count').max=c.count;$('m-loc').value=c.loc==='In a Deck'?'Box 2 (Red)':'In a Deck';$('m-deck').value=''}
   $('editor').showModal();
+  if(!c)$('l-q').focus();
+}
+function showBig(src){$('e-img').hidden=!src;if(src)$('e-img').src=src;else $('e-img').removeAttribute('src')}
+function lookupMsg(html){$('l-msg').innerHTML=html;$('l-msg').hidden=!html}
+async function fillLookupSets(want){
+  const sel=$('l-set');
+  try{
+    const sets=await tcgSets(),cur=want??sel.value;
+    sel.innerHTML='<option value="">Any set</option>'+sets.map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+    sel.value=sets.some(s=>s.id===cur)?cur:'';
+  }catch{}
+}
+async function runLookup(){
+  const q=$('l-q').value.trim(),setId=$('l-set').value,R=$('l-results');
+  if(!q&&!setId){lookupMsg('Type a card name, or choose a set.');return}
+  lookupMsg('Searching…');R.innerHTML='';
+  try{
+    const sets=await tcgSets(),order=new Map(sets.map((s,i)=>[s.id,i])),names=new Map(sets.map(s=>[s.id,s.name]));
+    let list=setId?(await api('en/sets/'+encodeURIComponent(setId))).cards:await api('en/cards?name='+encodeURIComponent(q));
+    if(setId&&q)list=list.filter(x=>/^\d+$/.test(q)?numKey(x.localId)===numKey(q):norm(x.name).includes(norm(q)));
+    list=list.filter(x=>order.has(setOf(x.id)));
+    list.sort((a,b)=>order.get(setOf(a.id))-order.get(setOf(b.id))||String(a.localId).localeCompare(String(b.localId),undefined,{numeric:true}));
+    if(!list.length){lookupMsg('No cards found. Check the spelling, or try a shorter name.');return}
+    const max=120;
+    lookupMsg(list.length>max?`Showing the newest ${max} of ${list.length} cards. Choose a set to narrow it down.`:`${list.length} card${list.length===1?'':'s'} found. Tap the one you have.`);
+    R.innerHTML=list.slice(0,max).map(x=>`<button type="button" class="pick" data-pick="${esc(x.id)}"><img loading="lazy" src="${esc(x.image?x.image+'/low.webp':tcgdexImage(x.id))}" alt="">
+      <span class="nm">${esc(x.name)}</span><span class="small muted">${esc(names.get(setOf(x.id)))} · ${esc(x.localId)}</span></button>`).join('');
+  }catch{lookupMsg('Card search is unavailable right now. Check your connection and try again.')}
+}
+async function pickCard(id){
+  lookupMsg('Loading card…');
+  try{
+    const setId=setOf(id),[d,info]=await Promise.all([api('en/cards/'+encodeURIComponent(id)),api('en/sets/'+encodeURIComponent(setId)).catch(()=>null)]);
+    const abbr=abbrFor(setId,info),c=fromTcgdex(d,abbr),tp=d.pricing?.tcgplayer;
+    const print=S.editing?$('e-print').value||'Normal':c.print,price=marketPrice(tp,print);
+    S.lookup={set:c.set,num:c.num,tcg:c.tcg,img:c.img,setName:SETS[abbr]?'':(info?.name||d.set?.name||''),tcgplayer:tp,priceDate:(tp?.updated||'').slice(0,10)};
+    for(const k of ['name','type','detail','energy','set','num','rarity'])$('e-'+k).value=c[k]||'';
+    $('e-print').value=print;$('e-price').value=price??'';
+    showBig(cardImage(c,'high'));$('l-results').innerHTML='';$('lookup').open=false;
+    let msg=`Filled in from ${esc(info?.name||abbr)} ${esc(c.num)}. Check the printing, count and location, then save.`;
+    if(!S.editing){
+      const same=S.cards.filter(x=>x.tcg===c.tcg||(x.set===c.set&&x.num===c.num));
+      if(same.length)msg+=` <br>You already have ${same.reduce((n,x)=>n+x.count,0)} of this card (${esc([...new Set(same.map(x=>x.loc==='In a Deck'?'Deck: '+(x.deck||'none'):x.loc))].join(', '))}). <button type="button" class="linkbtn" data-open="${esc(same[0].id)}">Open that entry instead</button>`;
+    }
+    $('lookupDone').innerHTML=msg;$('lookupDone').hidden=false;lookupMsg('');
+  }catch{lookupMsg('That card could not be loaded. Check your connection and try again.')}
 }
 function readForm(){
-  const g=id=>$(id).value.trim(),price=parseFloat(g('e-price'));
-  return clean({name:g('e-name'),type:g('e-type'),detail:g('e-detail'),energy:g('e-energy'),count:Math.max(1,parseInt(g('e-count'),10)||1),set:g('e-set'),num:g('e-num'),rarity:g('e-rarity'),print:g('e-print')||'Normal',pattern:g('e-pattern'),stamp:g('e-stamp'),loc:g('e-loc'),deck:g('e-deck'),price:Number.isFinite(price)?price:null,priceDate:S.editing?.priceDate,notes:g('e-notes')});
+  const g=id=>$(id).value.trim(),price=parseFloat(g('e-price')),set=g('e-set'),num=g('e-num');
+  // Keep the TCGdex link only while the set and number still match the card it came from
+  const ref=[S.lookup,S.editing].find(r=>r&&(r.set||'')===set&&(r.num||'')===num)||{};
+  return clean({name:g('e-name'),type:g('e-type'),detail:g('e-detail'),energy:g('e-energy'),count:Math.max(1,parseInt(g('e-count'),10)||1),set,num,rarity:g('e-rarity'),print:g('e-print')||'Normal',pattern:g('e-pattern'),stamp:g('e-stamp'),loc:g('e-loc'),deck:g('e-deck'),
+    price:Number.isFinite(price)?price:null,priceDate:S.lookup?.priceDate||S.editing?.priceDate,notes:g('e-notes'),tcg:ref.tcg,img:ref.img,lang:ref.lang,setName:ref.setName});
 }
 async function saveCard(ev){
   ev.preventDefault();
   const body=readForm(),was=S.editing;
   $('editor').close();
   try{
-    if(was)await retry(()=>db.doc('cards/'+was.id).set(body));
-    else await retry(()=>db.collection('cards').doc().set(body));
-    toast(was?`Saved ${body.name}`:`Added ${body.name}`);
+    const text=was?`Edited ${body.name}`:`Added ${body.count}× ${body.name}`;
+    const id=await act(text,[{path:'cards/'+(was?was.id:newId()),set:body}]);
+    toast(was?`Saved ${body.name}`:`Added ${body.name}`,undoAction(id));
   }catch(e){toast(failMsg(e))}
 }
 async function moveCopies(){
@@ -290,26 +523,26 @@ async function moveCopies(){
   if(!loc){toast('Choose where to move the cards.');return}
   if(loc===c.loc&&deck===(c.deck||'')){toast('These cards are already there.');return}
   const same=x=>x.id!==c.id&&identity(x)===identity(c)&&(x.stamp||'')===(c.stamp||'')&&(x.set||'')===(c.set||'')&&x.loc===loc&&(x.deck||'')===deck;
-  const target=S.cards.find(same);
+  const target=S.cards.find(same),ops=[];
+  if(target)ops.push({path:'cards/'+target.id,update:{count:target.count+n}});
+  else{const{id,...rest}=c;ops.push({path:'cards/'+newId(),set:clean({...rest,count:n,loc,deck})})}
+  ops.push(n>=c.count?{path:'cards/'+c.id,delete:true}:{path:'cards/'+c.id,update:{count:c.count-n}});
   $('editor').close();
-  try{
-    if(target)await retry(()=>db.doc('cards/'+target.id).update({count:target.count+n}));
-    else{const{id,...rest}=c;await retry(()=>db.collection('cards').doc().set(clean({...rest,count:n,loc,deck})))}
-    if(n>=c.count)await retry(()=>db.doc('cards/'+c.id).delete());
-    else await retry(()=>db.doc('cards/'+c.id).update({count:c.count-n}));
-    toast(`Moved ${n} ${c.name} to ${deck||loc}`);
-  }catch(e){toast(failMsg(e))}
+  try{const id=await act(`Moved ${n}× ${c.name} to ${deck||loc}`,ops);toast(`Moved ${n} ${c.name} to ${deck||loc}`,undoAction(id))}
+  catch(e){toast(failMsg(e))}
 }
 async function deleteCard(){
   const b=$('delBtn');
   if(!b.dataset.armed){b.dataset.armed='1';b.textContent='Confirm delete';return}
   const c=S.editing;$('editor').close();
-  try{await retry(()=>db.doc('cards/'+c.id).delete());toast(`Deleted ${c.name}`)}catch(e){toast(failMsg(e))}
+  try{const id=await act(`Deleted ${c.count}× ${c.name}`,[{path:'cards/'+c.id,delete:true}]);toast(`Deleted ${c.name}`,undoAction(id))}
+  catch(e){toast(failMsg(e))}
 }
-async function toggleWish(id){
-  const ck=S.checklists.PBL;if(!ck||!S.canWrite)return;
-  const w=new Set(ck.wish||[]);w.has(id)?w.delete(id):w.add(id);
-  try{await retry(()=>db.doc('checklists/PBL').update({wish:[...w]}))}catch(e){toast(failMsg(e))}
+async function toggleWish(xid){
+  const ck=currentCk();if(!ck||!S.canWrite)return;
+  const w=new Set(ck.wish||[]),on=!w.has(xid);on?w.add(xid):w.delete(xid);
+  const name=ck.cards.find(x=>x.id===xid)?.name||xid;
+  try{await act(`${on?'Wishlisted':'Took off the wishlist:'} ${name} (${ck.name} ${xid})`,[{path:'checklists/'+ck.id,update:{wish:[...w]}}])}catch(e){toast(failMsg(e))}
 }
 
 /* import and export */
@@ -330,28 +563,31 @@ function openImport(rows){
 async function runImport(addCards){
   const plan=IMP||[],loc=$('impLoc').value.trim()||'Box 2 (Red)',today=new Date().toISOString().slice(0,10);
   $('importer').close();
-  const jobs=[];
+  const ops=[];
   for(const r of plan){
     const priced=r.price!=null?{price:r.price,priceDate:today}:{};
     r.hits.forEach((c,i)=>{
       const add=addCards&&i===0?{count:c.count+r.qty}:{};
-      if(Object.keys({...priced,...add}).length)jobs.push(()=>db.doc('cards/'+c.id).update({...priced,...add}));
+      if(Object.keys({...priced,...add}).length)ops.push({path:'cards/'+c.id,update:{...priced,...add}});
     });
     if(addCards&&!r.hits.length){
       const l=r.like||{};
-      jobs.push(()=>db.collection('cards').doc().set(clean({name:r.name,type:l.type,detail:l.detail,energy:l.energy,count:r.qty,loc,set:r.set,num:r.num,rarity:r.rarity,print:r.print,pattern:r.pattern,stamp:r.stamp,...priced,notes:r.set?'':'Set: '+r.setName})));
+      ops.push({path:'cards/'+newId(),set:clean({name:r.name,type:l.type,detail:l.detail,energy:l.energy,count:r.qty,loc,set:r.set,num:r.num,rarity:r.rarity,print:r.print,pattern:r.pattern,stamp:r.stamp,...priced,notes:r.set?'':'Set: '+r.setName})});
     }
   }
+  banner(addCards?'Importing…':'Updating prices…');
   try{
-    await pool(jobs,j=>j(),4,n=>banner(`Importing ${n} of ${jobs.length}…`));
-    banner('');toast(addCards?`Imported ${plan.length} cards`:'Prices updated');
+    let id;
+    if(addCards)id=await act(`Imported ${plan.reduce((n,r)=>n+r.qty,0)} cards from TCGplayer`,ops);
+    else await db.batch(ops);
+    banner('');toast(addCards?`Imported ${plan.length} cards`:'Prices updated',id&&undoAction(id));
   }catch(e){banner('');toast(failMsg(e))}
 }
 async function exportCSV(){
   const head=['Card Name','Card Type','Detailed Type','Energy Type','Count','Location','Set Abbr.','Card Number','Rarity','Printing','Pattern','Stamp','TCG Market Price','Notes'];
   const q=v=>{const s=String(v??'');return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s};
   const rows=[...S.cards].sort((a,b)=>a.name.localeCompare(b.name)).map(c=>[c.name,c.type,c.detail,c.energy,c.count,c.loc,c.set,c.num,c.rarity,c.print,c.pattern,c.stamp,c.price,[c.deck,c.notes].filter(Boolean).join(', ')].map(q).join(','));
-  download(`Card_Library_${stamp()}.csv`,'\uFEFF'+[head.join(','),...rows].join('\r\n'),'text/csv');
+  download(`Card_Library_${stamp()}.csv`,'﻿'+[head.join(','),...rows].join('\r\n'),'text/csv');
 }
 const stamp=()=>new Date().toISOString().slice(0,10).replace(/-/g,'');
 function download(filename,data,type){
@@ -372,32 +608,44 @@ async function restoreBackup(file){
     banner('');toast(`Restored ${data.cards.length} entries`);
   }catch(e){banner('');toast(failMsg(e))}
 }
-async function updatePrices(){
-  const btn=$('pricesBtn'),cards=S.cards.filter(c=>tcgdexId(c)&&!c.pattern&&!c.stamp),ids=[...new Set(cards.map(tcgdexId))],found={};
+// quiet: the automatic weekly refresh, which shows no progress banner
+async function updatePrices(quiet){
+  const btn=$('pricesBtn'),key=c=>tcgdexLang(c)+'/'+tcgdexId(c);
+  const cards=S.cards.filter(c=>tcgdexId(c)&&!c.pattern&&!c.stamp),keys=[...new Set(cards.map(key))],found={};
   btn.disabled=true;
+  try{await db.doc('meta/prices').set({at:new Date().toISOString(),by:S.me})}catch{}
   let done=0,failed=0;
   await Promise.all(Array.from({length:6},async()=>{
-    while(ids.length){
-      const id=ids.pop();
+    while(keys.length){
+      const k=keys.pop(),[lang,id]=k.split('/');
       try{
-        const r=await fetch('https://api.tcgdex.net/v2/en/cards/'+encodeURIComponent(id));
-        if(r.ok)found[id]=(await r.json()).pricing?.tcgplayer;else if(r.status!==404)failed++;
+        const r=await fetch(`${API}${lang}/cards/${encodeURIComponent(id)}`);
+        if(r.ok)found[k]=(await r.json()).pricing?.tcgplayer;else if(r.status!==404)failed++;
       }catch{failed++}
-      banner(`Checking prices: ${++done} cards…`);
+      done++;if(!quiet)banner(`Checking prices: ${done} cards…`);
     }
   }));
   const ops=[];let priced=0;
   for(const c of cards){
-    const t=found[tcgdexId(c)],p=marketPrice(t,c.print);
+    const t=found[key(c)],p=marketPrice(t,c.print);
     if(p==null)continue;
     priced++;
     if(p!==c.price)ops.push({path:'cards/'+c.id,update:{price:p,priceDate:(t.updated||'').slice(0,10)}});
   }
   try{
     await db.batch(ops);
-    banner('');toast(failed?`Updated ${priced} prices. ${failed} cards could not be reached; try again later.`:`Updated ${priced} prices. Stamped and patterned cards are left out.`);
-  }catch(e){banner('');toast(failMsg(e))}
+    banner('');
+    if(!quiet)toast(failed?`Updated ${priced} prices. ${failed} cards could not be reached; try again later.`:`Updated ${priced} prices. Stamped and patterned cards are left out.`);
+    else if(ops.length)toast(`Prices refreshed for this week: ${ops.length} changed.`);
+  }catch(e){banner('');if(!quiet)toast(failMsg(e))}
   btn.disabled=false;
+}
+let autoPriced=false;
+function maybeAutoPrices(){
+  if(autoPriced||!S.ready||!S.metaReady||!S.canWrite||!S.cards.length)return;
+  const last=S.meta.prices?.at;
+  if(last&&Date.now()-Date.parse(last)<PRICE_DAYS*864e5)return;
+  autoPriced=true;updatePrices(true);
 }
 
 /* wiring */
@@ -407,12 +655,28 @@ document.addEventListener('click',e=>{
   if(t.dataset.view){S.view=t.dataset.view;S.limit=PAGE;render();return}
   if(t.dataset.open){const c=S.byId.get(t.dataset.open);if(c)openEditor(c);return}
   if(t.dataset.step){bump(t.dataset.id,+t.dataset.step);return}
-  if(t.dataset.set){clearFilters();$('f-set').value=t.dataset.set;$('f-sort').value='set';S.view=t.dataset.set==='PBL'?'checklist':'library';render();return}
+  if(t.dataset.pick){pickCard(t.dataset.pick);return}
+  if(t.dataset.undo){undoAct(t.dataset.undo);return}
+  if(t.dataset.set){
+    const s=t.dataset.set;clearFilters();
+    if(S.checklists[s]){S.ckSel=s;S.view='checklist'}else{$('f-set').value=s;$('f-sort').value='set';S.view='library'}
+    render();return}
   if('loc'in t.dataset){clearFilters();const o=$('f-loc');
     if(![...o.options].some(x=>x.value===t.dataset.loc)&&t.dataset.loc==='deck:')o.add(new Option('Deck: not assigned','deck:'));
     o.value=t.dataset.loc;S.view='library';render();return}
   if(t.dataset.ck){S.ckFilter=t.dataset.ck;renderChecklist();return}
   if(t.dataset.wish&&!t.classList.contains('have')){toggleWish(t.dataset.wish);return}
+  if(t.id==='ckNew'){S.ckNew=true;renderChecklist();return}
+  if(t.id==='ckCancel'){S.ckNew=false;renderChecklist();return}
+  if(t.id==='ckCreate'){createChecklist();return}
+  if(t.id==='ckRemove'){removeChecklist(t);return}
+  if(t.id==='tradeMore'){S.limit+=PAGE;renderTrade();return}
+});
+document.addEventListener('change',e=>{
+  const t=e.target;
+  if(t.id==='keepSel'){S.keep=+t.value;store('keep',t.value);renderTrade()}
+  if(t.id==='ckSel'){S.ckSel=t.value;store('ck',t.value);renderChecklist()}
+  if(t.id==='ckNewSet')S.ckNewVal=t.value;
 });
 function clearFilters(){for(const i of ['f-q','f-type','f-energy','f-set','f-loc','f-check'])$(i).value='';S.limit=PAGE}
 for(const i of ['f-q','f-type','f-energy','f-set','f-loc','f-check','f-sort'])$(i).addEventListener(i==='f-q'?'input':'change',()=>{S.limit=PAGE;renderLibrary()});
@@ -420,8 +684,15 @@ $('clearFilters').onclick=()=>{clearFilters();renderLibrary()};
 $('more').onclick=()=>{S.limit+=PAGE;renderLibrary()};
 $('addBtn').onclick=()=>openEditor(null);
 $('cancelBtn').onclick=()=>$('editor').close();
+$('editor').addEventListener('close',()=>{$('lookupDone').hidden=true});
 $('editForm').addEventListener('submit',saveCard);
 $('delBtn').onclick=deleteCard;$('moveBtn').onclick=moveCopies;
+$('l-go').onclick=runLookup;
+$('l-q').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();runLookup()}});
+$('l-set').addEventListener('change',runLookup);
+$('e-print').addEventListener('change',()=>{
+  const tp=S.lookup?.tcgplayer;if(!tp)return;const p=marketPrice(tp,$('e-print').value);$('e-price').value=p??'';
+});
 $('e-name').addEventListener('change',()=>{
   if(S.editing)return;const l=S.cards.find(c=>norm(c.name)===norm($('e-name').value));if(!l)return;
   for(const k of ['type','detail','energy'])if(!$('e-'+k).value)$('e-'+k).value=l[k]||'';
@@ -437,7 +708,7 @@ $('impCancel').onclick=()=>$('importer').close();
 $('impAdd').onclick=()=>runImport(true);$('impPrices').onclick=()=>runImport(false);
 $('exportBtn').onclick=exportCSV;
 $('backupBtn').onclick=downloadBackup;
-$('pricesBtn').onclick=updatePrices;
+$('pricesBtn').onclick=()=>updatePrices(false);
 $('restoreFile').addEventListener('change',e=>{const f=e.target.files[0];if(f)restoreBackup(f)});
 document.addEventListener('error',e=>{if(e.target.tagName==='IMG')e.target.hidden=true},true);
 $('signInBtn').onclick=async()=>{
@@ -453,7 +724,7 @@ function gate(msg,denied){
 }
 function stopData(){
   stops.forEach(u=>u());stops=[];clearTimeout(slow);
-  S.cards=[];S.byId=new Map();S.checklists={};S.ready=false;banner('');
+  S.cards=[];S.byId=new Map();S.checklists={};S.activity=[];S.meta={};S.ready=false;S.metaReady=false;autoPriced=false;banner('');
 }
 function dataError(e){
   clearTimeout(slow);
@@ -465,18 +736,25 @@ function startData(){
   stops.push(db.collection('cards').onSnapshot(snap=>{
     S.cards=snap.docs.map(d=>({id:d.id,count:1,...d.data()}));
     S.byId=new Map(S.cards.map(c=>[c.id,c]));
-    if(!snap.metadata.fromCache){clearTimeout(slow);if($('banner').textContent.startsWith('Your library is taking'))banner('');S.ready=true}
+    if(!snap.metadata.fromCache){clearTimeout(slow);if($('banner').textContent.startsWith('Your library is taking'))banner('');S.ready=true;maybeAutoPrices()}
     queueRender();
   },dataError));
   stops.push(db.collection('checklists').onSnapshot(snap=>{S.checklists=Object.fromEntries(snap.docs.map(d=>[d.id,d.data()]));queueRender()},dataError));
+  stops.push(db.collection('meta').onSnapshot(snap=>{
+    S.meta=Object.fromEntries(snap.docs.map(d=>[d.id,d.data()]));
+    if(!snap.metadata.fromCache){S.metaReady=true;maybeAutoPrices()}
+    queueRender();
+  },dataError));
+  stops.push(db.collection('activity').recent('at',100,snap=>{S.activity=snap.docs.map(d=>({...d.data(),id:d.id}));if(S.view==='activity')queueRender()},dataError));
 }
 function start(){
-  const h=location.hash.slice(1);if(['library','sets','checklist','places'].includes(h))S.view=h;
+  const h=location.hash.slice(1);if(VIEWS.includes(h))S.view=h;
   render();
   auth.onChange(user=>{
     stopData();
     if(!user){gate('Sign in with Google to open your collection.');return}
     $('gate').hidden=true;$('app').hidden=false;$('who').textContent=user.email;
+    S.me=(user.displayName||'').split(' ')[0]||user.email;
     startData();render();
   });
 }

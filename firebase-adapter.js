@@ -3,7 +3,7 @@
 // by the Firestore security rules, which allow only the two listed accounts.
 import {initializeApp} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
 import {getAuth,GoogleAuthProvider,signInWithPopup,signInWithRedirect,signOut,onAuthStateChanged} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
-import {initializeFirestore,getFirestore,persistentLocalCache,persistentMultipleTabManager,collection,doc,setDoc,updateDoc,deleteDoc,onSnapshot,writeBatch} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
+import {initializeFirestore,getFirestore,persistentLocalCache,persistentMultipleTabManager,collection,doc,setDoc,updateDoc,deleteDoc,onSnapshot,writeBatch,query,orderBy,limit} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 
 const firebaseConfig={
   apiKey:'AIzaSyBemMQRK5JcKGf-zXNVaJKskhl3t0YVi90',
@@ -32,14 +32,17 @@ export const db={
   doc:path=>wrap(doc(fs,path)),
   collection:name=>({
     doc:id=>wrap(id?doc(fs,name,id):doc(collection(fs,name))),
-    onSnapshot:(next,error)=>onSnapshot(collection(fs,name),{includeMetadataChanges:true},next,error)
+    onSnapshot:(next,error)=>onSnapshot(collection(fs,name),{includeMetadataChanges:true},next,error),
+    // The newest n documents, by a field, newest first
+    recent:(field,n,next,error)=>onSnapshot(query(collection(fs,name),orderBy(field,'desc'),limit(n)),next,error)
   }),
-  // ops: [{path, set}] or [{path, update}]
+  // ops: [{path, set}], [{path, update}] or [{path, delete:true}]
   async batch(ops,onProgress){
     for(let i=0;i<ops.length;i+=BATCH_SIZE){
       const b=writeBatch(fs);
       for(const op of ops.slice(i,i+BATCH_SIZE)){
-        if(op.set)b.set(doc(fs,op.path),op.set);else b.update(doc(fs,op.path),op.update);
+        const ref=doc(fs,op.path);
+        if(op.delete)b.delete(ref);else if(op.set)b.set(ref,op.set);else b.update(ref,op.update);
       }
       await b.commit();
       onProgress?.(Math.min(i+BATCH_SIZE,ops.length));

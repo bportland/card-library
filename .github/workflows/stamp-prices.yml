@@ -1,0 +1,29 @@
+# Once a week, copy TCGplayer prices for stamped cards from tcgcsv.com onto the `prices` branch.
+# The app reads the file from there during its weekly price update. Eight small downloads per run.
+name: Stamp prices
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'   # Mondays, 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: mkdir out && python tools/stamp_prices.py out/stamp-prices.json
+      # The branch holds only the latest file, so each run replaces it with a single commit
+      - name: Publish to the prices branch
+        working-directory: out
+        run: |
+          git init -q -b prices
+          git add stamp-prices.json
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -q -m 'Update stamp prices'
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" prices

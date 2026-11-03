@@ -62,7 +62,22 @@ function marketPrice(tcgplayer,print){
   if(hit!=null)return hit;
   return print==='Reverse Holofoil'?null:tcgplayer.normal?.marketPrice??tcgplayer.holofoil?.marketPrice??null;
 }
+// Patterned printings have their own TCGdex variant and price; stamped ones have no price, and neither does Cosmos Holo
+const FOIL={'Cosmos Holo':'cosmos','Poke Ball Pattern':'pokeball','Master Ball Pattern':'masterball','Energy Pattern':'energy','Team Rocket Pattern':'team-rocket','Quick Ball Pattern':'quickball','Love Ball Pattern':'loveball','Friend Ball Pattern':'friendball','Dusk Ball Pattern':'duskball'};
+function cardPrice(d,print,pattern){
+  if(!pattern)return {price:marketPrice(d?.pricing?.tcgplayer,print),updated:d?.pricing?.tcgplayer?.updated};
+  const tp=(d?.variants_detailed||[]).find(v=>v.foil===FOIL[pattern]&&!v.stamp)?.pricing?.tcgplayer;
+  return {price:tp?marketPrice(tp,print)??Object.values(tp).find(x=>x?.marketPrice!=null)?.marketPrice??null:null,updated:tp?.updated};
+}
 const numKey=s=>String(s).replace(/^0+(?=\d)/,'');
+// Stamped printings are priced from TCGplayer listings: Play! stamps are prize pack cards, set logo stamps are promos
+const sameNum=(a,b)=>{const x=String(a||'').split('/'),y=String(b||'').split('/');return x.length===y.length&&x.every((n,i)=>numKey(n)===numKey(y[i]))};
+function stampPrice(list,c){
+  const name=norm(c.name).replace(/[^a-z0-9]/g,''),group=c.stamp==='Play! Stamp'?'prize':c.set;
+  const hit=(list?.cards||[]).find(x=>x.g===group&&sameNum(x.num,c.num)&&norm(x.name).replace(/[^a-z0-9]/g,'')===name
+    &&!x.tags.includes('Staff')&&x.tags.some(t=>/cosmo/i.test(t))===(c.pattern==='Cosmos Holo'));
+  return hit?hit.prices[c.print]??Object.values(hit.prices)[0]??null:null;
+}
 /*pure-end*/
 
 const TYPES=['Pokemon','Trainer','Energy'];
@@ -139,6 +154,10 @@ async function undoAct(id){
 
 /* TCGdex */
 const API='https://api.tcgdex.net/v2/',apiCache=new Map();
+// Built weekly by .github/workflows/stamp-prices.yml
+const STAMP_PRICES='https://raw.githubusercontent.com/bportland/card-library/prices/stamp-prices.json';
+let stampList;
+const stampPrices=()=>stampList??=fetch(STAMP_PRICES).then(r=>r.ok?r.json():null).catch(()=>null);
 function api(path){
   if(!apiCache.has(path))apiCache.set(path,fetch(API+path).then(r=>{if(!r.ok)throw new Error(r.status);return r.json()}).catch(e=>{apiCache.delete(path);throw e}));
   return apiCache.get(path);
@@ -500,11 +519,11 @@ async function pickCard(id){
   lookupMsg('Loading card…');
   try{
     const setId=setOf(id),[d,info]=await Promise.all([api('en/cards/'+encodeURIComponent(id)),api('en/sets/'+encodeURIComponent(setId)).catch(()=>null)]);
-    const abbr=abbrFor(setId,info),c=fromTcgdex(d,abbr),tp=d.pricing?.tcgplayer;
-    const print=S.editing?$('e-print').value||'Normal':c.print,price=marketPrice(tp,print);
-    S.lookup={set:c.set,num:c.num,tcg:c.tcg,img:c.img,setName:SETS[abbr]?'':(info?.name||d.set?.name||''),tcgplayer:tp,priceDate:(tp?.updated||'').slice(0,10)};
+    const abbr=abbrFor(setId,info),c=fromTcgdex(d,abbr);
+    const print=S.editing?$('e-print').value||'Normal':c.print;
+    S.lookup={set:c.set,num:c.num,tcg:c.tcg,img:c.img,setName:SETS[abbr]?'':(info?.name||d.set?.name||''),card:d};
     for(const k of ['name','type','detail','energy','set','num','rarity'])$('e-'+k).value=c[k]||'';
-    $('e-print').value=print;$('e-price').value=price??'';
+    $('e-print').value=print;lookupPrice();
     showBig(cardImage(c,'high'));$('l-results').innerHTML='';$('lookup').open=false;
     let msg=`Filled in from ${esc(info?.name||abbr)} ${esc(c.num)}. Check the printing, count and location, then save.`;
     if(!S.editing){
@@ -625,8 +644,9 @@ async function restoreBackup(file){
 // quiet: the automatic weekly refresh, which shows no progress banner
 async function updatePrices(quiet){
   const btn=$('pricesBtn'),key=c=>tcgdexLang(c)+'/'+tcgdexId(c);
-  const cards=S.cards.filter(c=>tcgdexId(c)&&!c.pattern&&!c.stamp),keys=[...new Set(cards.map(key))],found={};
+  const cards=S.cards.filter(c=>tcgdexId(c)&&!c.stamp),keys=[...new Set(cards.map(key))],found={};
   btn.disabled=true;
+  const stamps=await stampPrices();
   try{await db.doc('meta/prices').set({at:new Date().toISOString(),by:S.me})}catch{}
   let done=0,failed=0;
   await Promise.all(Array.from({length:6},async()=>{
@@ -634,22 +654,28 @@ async function updatePrices(quiet){
       const k=keys.pop(),[lang,id]=k.split('/');
       try{
         const r=await fetch(`${API}${lang}/cards/${encodeURIComponent(id)}`);
-        if(r.ok)found[k]=(await r.json()).pricing?.tcgplayer;else if(r.status!==404)failed++;
+        if(r.ok)found[k]=await r.json();else if(r.status!==404)failed++;
       }catch{failed++}
       done++;if(!quiet)banner(`Checking prices: ${done} cards…`);
     }
   }));
   const ops=[];let priced=0;
   for(const c of cards){
-    const t=found[key(c)],p=marketPrice(t,c.print);
+    const {price:p,updated}=cardPrice(found[key(c)],c.print,c.pattern);
     if(p==null)continue;
     priced++;
-    if(p!==c.price)ops.push({path:'cards/'+c.id,update:{price:p,priceDate:(t.updated||'').slice(0,10)}});
+    if(p!==c.price)ops.push({path:'cards/'+c.id,update:{price:p,priceDate:(updated||'').slice(0,10)}});
+  }
+  for(const c of S.cards.filter(c=>c.stamp)){
+    const p=stampPrice(stamps,c);
+    if(p==null)continue;
+    priced++;
+    if(p!==c.price)ops.push({path:'cards/'+c.id,update:{price:p,priceDate:stamps.updated}});
   }
   try{
     await db.batch(ops);
     banner('');
-    if(!quiet)toast(failed?`Updated ${priced} prices. ${failed} cards could not be reached; try again later.`:`Updated ${priced} prices. Stamped and patterned cards are left out.`);
+    if(!quiet)toast(failed?`Updated ${priced} prices. ${failed} cards could not be reached; try again later.`:`Updated ${priced} prices. Cards with no match keep the price you entered.`);
     else if(ops.length)toast(`Prices refreshed for this week: ${ops.length} changed.`);
   }catch(e){banner('');if(!quiet)toast(failMsg(e))}
   btn.disabled=false;
@@ -704,9 +730,19 @@ $('delBtn').onclick=deleteCard;$('moveBtn').onclick=moveCopies;
 $('l-go').onclick=runLookup;
 $('l-q').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();runLookup()}});
 $('l-set').addEventListener('change',runLookup);
-$('e-print').addEventListener('change',()=>{
-  const tp=S.lookup?.tcgplayer;if(!tp)return;const p=marketPrice(tp,$('e-print').value);$('e-price').value=p??'';
-});
+// After a lookup, keep the price in step with the chosen printing and pattern
+// A stamped card's price is filled in only when a TCGplayer listing matches, so a typed price isn't cleared
+async function lookupPrice(){
+  if($('e-stamp').value){
+    const list=await stampPrices(),f=readForm(),p=stampPrice(list,f);
+    if(p!=null&&$('e-stamp').value===f.stamp){$('e-price').value=p;if(S.lookup)S.lookup.priceDate=list.updated}
+    return;
+  }
+  if(!S.lookup?.card)return;
+  const {price,updated}=cardPrice(S.lookup.card,$('e-print').value,$('e-pattern').value);
+  $('e-price').value=price??'';S.lookup.priceDate=(updated||'').slice(0,10);
+}
+for(const i of ['e-print','e-pattern','e-stamp'])$(i).addEventListener('change',lookupPrice);
 $('e-name').addEventListener('change',()=>{
   if(S.editing)return;const l=S.cards.find(c=>norm(c.name)===norm($('e-name').value));if(!l)return;
   for(const k of ['type','detail','energy'])if(!$('e-'+k).value)$('e-'+k).value=l[k]||'';

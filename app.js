@@ -196,8 +196,10 @@ function filtered(){
   // Energy, then Pokemon, then Trainer; Basic Energy before Special Energy; then by energy type
   const tk=c=>{const t=['Energy','Pokemon','Trainer'].indexOf(c.type);return t<0?3:t},
     ek=c=>c.type!=='Energy'?0:c.detail==='Basic Energy'?0:c.detail==='Special Energy'?1:2;
-  rows.sort(srt==='type'?(a,b)=>tk(a)-tk(b)||ek(a)-ek(b)||(a.energy||'~').localeCompare(b.energy||'~')||byName(a,b)
-    :srt==='set'?(a,b)=>(a.set||'~').localeCompare(b.set||'~')||(a.num||'').localeCompare(b.num||'')||byName(a,b)
+  // Blank values go last (localeCompare would put a '~' placeholder before letters)
+  const blankLast=(x,y)=>!x-!y||(x||'').localeCompare(y||'');
+  rows.sort(srt==='type'?(a,b)=>tk(a)-tk(b)||ek(a)-ek(b)||blankLast(a.energy,b.energy)||byName(a,b)
+    :srt==='set'?(a,b)=>blankLast(a.set,b.set)||(a.num||'').localeCompare(b.num||'')||byName(a,b)
     :srt==='count'?(a,b)=>displayCount(b)-displayCount(a)||byName(a,b)
     :srt==='rarity'?(a,b)=>rk(b)-rk(a)||byName(a,b)
     :srt==='price'?(a,b)=>((b.price||0)*b.count)-((a.price||0)*a.count)||byName(a,b)

@@ -216,7 +216,7 @@ function filtered(){
   const rows=S.cards.filter(c=>{
     if(q&&!norm([c.name,c.num,c.set,c.notes,c.deck,c.detail].join(' ')).includes(q))return false;
     if(ty&&c.type!==ty)return false;if(en&&c.energy!==en)return false;if(st&&c.set!==st)return false;
-    if(lo&&!(lo.startsWith('deck:')?(c.loc==='In a Deck'&&(c.deck||'')===lo.slice(5)):c.loc===lo))return false;
+    if(lo&&!(lo.startsWith('deck:')?(inDeck(c)&&(c.deck||'')===lo.slice(5)):c.loc===lo))return false;
     if(ck==='special'&&!c.pattern&&!c.stamp)return false;
     if(ck==='review'&&!reviewReason(c,td))return false;
     if(ck==='noset'&&c.set)return false;
@@ -258,6 +258,9 @@ function fillSelect(el,opts,placeholder){
   el.value=[...el.options].some(o=>o.value===cur)?cur:'';
 }
 const allLocs=()=>[...new Set([...LOCATIONS,...S.cards.map(c=>c.loc).filter(Boolean)])];
+// Any location with "deck" in its name (In a Deck, Deck Box 1, Deckbox 2) holds cards that are in a deck
+const inDeck=c=>/deck/i.test(c.loc||'');
+const whereText=c=>inDeck(c)?[c.loc==='In a Deck'?'':c.loc,c.deck?'Deck: '+c.deck:''].filter(Boolean).join(' · ')||'In a deck':c.loc||'';
 const allDecks=()=>[...new Set(S.cards.map(c=>c.deck).filter(Boolean))].sort();
 function renderLists(){
   const sets=[...new Set(S.cards.map(c=>c.set).filter(Boolean))].sort((a,b)=>setLabel(a).localeCompare(setLabel(b)));
@@ -280,7 +283,7 @@ function rowHTML(c,td){
   if(c.print&&c.print!=='Normal')bits.push(`<span>${esc(c.print)}</span>`);
   if(c.pattern)bits.push(`<span class="tag">${esc(c.pattern)}</span>`);
   if(c.stamp)bits.push(`<span class="tag">${esc(c.stamp)}</span>`);
-  bits.push(`<span>${esc(c.loc==='In a Deck'?(c.deck?'Deck: '+c.deck:'In a deck'):c.loc||'')}</span>`);
+  bits.push(`<span>${esc(whereText(c))}</span>`);
   if(c.notes)bits.push(`<span>${esc(c.notes)}</span>`);
   const why=reviewReason(c,td);if(why)bits.push(`<span class="tag warn">${esc(why)}</span>`);
   if(c.price!=null)bits.push(`<span class="price">${money(c.price)}</span>`);
@@ -406,13 +409,13 @@ function renderPlaces(){
   const sum=f=>S.cards.filter(f).reduce((n,c)=>n+displayCount(c),0);
   const locs=LOCATIONS.concat(allLocs().filter(l=>!LOCATIONS.includes(l)));
   const tile=(key,name,sub,extra)=>`<button class="set" data-loc="${esc(key)}"><span class="top"><h3>${esc(name)}</h3></span>${extra??''}<span class="small muted">${esc(sub)}</span></button>`;
-  const decks=allDecks(),loose=sum(c=>c.loc==='In a Deck'&&!c.deck);
+  const decks=allDecks(),loose=sum(c=>inDeck(c)&&!c.deck);
   $('places').innerHTML=`<h2>Where your cards are</h2><div class="places">${locs.map(l=>{const n=sum(c=>c.loc===l);return tile(l,l,`${n.toLocaleString()} cards`)}).join('')}</div>
     <h2 style="margin-top:8px">Decks</h2><div class="places">${decks.map(d=>{
-      const cards=S.cards.filter(c=>c.loc==='In a Deck'&&c.deck===d),n=cards.reduce((t,c)=>t+displayCount(c),0),issues=deckIssues(cards);
+      const cards=S.cards.filter(c=>inDeck(c)&&c.deck===d),n=cards.reduce((t,c)=>t+displayCount(c),0),issues=deckIssues(cards);
       const check=issues.length?`<ul class="issues">${issues.map(i=>`<li>${esc(i)}</li>`).join('')}</ul>`:'<span class="small ok">✓ Meets the deck rules</span>';
       return tile('deck:'+d,d,`${n} of 60 cards`,`<span class="bar"><i style="width:${Math.min(100,n/60*100).toFixed(1)}%"></i></span>${check}`)}).join('')}
-    ${loose?tile('deck:','Not assigned to a deck',`${loose} cards marked In a Deck`):''}</div>
+    ${loose?tile('deck:','Not assigned to a deck',`${loose} cards in a deck location with no deck name`):''}</div>
     <p class="small muted">Deck checks cover 60 cards, at most 4 copies of a card name (Basic Energy excepted), one ACE SPEC, one Radiant Pokémon and at least one Basic Pokémon. They use the card type and rarity recorded in your library.</p>`;
 }
 
@@ -422,7 +425,7 @@ function tradeRows(){
   for(const c of S.cards){if(c.detail==='Basic Energy')continue;const k=[identity(c),c.set||'',c.stamp||''].join('|');(groups.get(k)||groups.set(k,[]).get(k)).push(c)}
   const rows=[];
   for(const g of groups.values()){
-    const inDecks=g.filter(c=>c.loc==='In a Deck').reduce((n,c)=>n+displayCount(c),0),spare=g.filter(c=>c.loc!=='In a Deck');
+    const inDecks=g.filter(inDeck).reduce((n,c)=>n+displayCount(c),0),spare=g.filter(c=>!inDeck(c));
     const extra=spare.reduce((n,c)=>n+displayCount(c),0)-Math.max(0,S.keep-inDecks);
     if(extra>0)rows.push({c:[...spare].sort((a,b)=>b.count-a.count)[0],extra,inDecks,locs:[...new Set(spare.map(c=>c.loc).filter(Boolean))],price:g.find(c=>c.price!=null)?.price??null});
   }
@@ -480,7 +483,9 @@ function openEditor(c){
   fillSelect($('e-print'),PRINTINGS);fillSelect($('e-pattern'),PATTERNS,'None');fillSelect($('e-stamp'),STAMPS,'None');
   // A new card goes where the library is filtered to, otherwise the location starts blank and must be chosen
   const lo=$('f-loc').value,deck=lo.startsWith('deck:');
-  const v=c||{count:1,print:'Normal',loc:deck?'In a Deck':lo,deck:deck?lo.slice(5):''};
+  // Filtered to a deck: use the location that deck's cards are kept in, such as its deck box
+  const deckLoc=deck&&S.cards.find(x=>inDeck(x)&&(x.deck||'')===lo.slice(5))?.loc;
+  const v=c||{count:1,print:'Normal',loc:deck?deckLoc||'In a Deck':lo,deck:deck?lo.slice(5):''};
   for(const k of ['name','type','detail','energy','count','set','num','rarity','print','pattern','stamp','loc','deck','price','notes'])set('e-'+k,v[k]);
   if(!c)$('e-print').value='Normal';
   $('lookup').hidden=!S.canWrite;$('lookup').open=!c;
@@ -490,7 +495,7 @@ function openEditor(c){
   $('delBtn').hidden=!c||!S.canWrite;$('delBtn').textContent='Delete';delete $('delBtn').dataset.armed;
   $('saveBtn').hidden=!S.canWrite;
   $('moveBox').hidden=!(c&&S.canWrite);
-  if(c){$('m-count').value=1;$('m-count').max=c.count;$('m-loc').value=c.loc==='In a Deck'?'Box 2 (Red)':'In a Deck';$('m-deck').value=''}
+  if(c){$('m-count').value=1;$('m-count').max=c.count;$('m-loc').value=inDeck(c)?'Box 2 (Red)':'In a Deck';$('m-deck').value=''}
   $('editor').showModal();
   if(!c)$('l-q').focus();
 }
@@ -534,7 +539,7 @@ async function pickCard(id){
     let msg=`Filled in from ${esc(info?.name||abbr)} ${esc(c.num)}. Check the printing, count and location, then save.`;
     if(!S.editing){
       const same=S.cards.filter(x=>x.tcg===c.tcg||(x.set===c.set&&x.num===c.num));
-      if(same.length)msg+=` <br>You already have ${same.reduce((n,x)=>n+x.count,0)} of this card (${esc([...new Set(same.map(x=>x.loc==='In a Deck'?'Deck: '+(x.deck||'none'):x.loc))].join(', '))}). <button type="button" class="linkbtn" data-open="${esc(same[0].id)}">Open that entry instead</button>`;
+      if(same.length)msg+=` <br>You already have ${same.reduce((n,x)=>n+x.count,0)} of this card (${esc([...new Set(same.map(whereText))].join(', '))}). <button type="button" class="linkbtn" data-open="${esc(same[0].id)}">Open that entry instead</button>`;
     }
     $('lookupDone').innerHTML=msg;$('lookupDone').hidden=false;lookupMsg('');
   }catch{lookupMsg('That card could not be loaded. Check your connection and try again.')}

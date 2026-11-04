@@ -80,6 +80,17 @@ select,input,textarea{background:var(--surface);border:1px solid var(--line);bor
 .pocket:focus-visible{outline:2px solid var(--link)}
 .pocket .n{display:flex;justify-content:space-between;font:400 .74rem var(--mono)}
 .places{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.spaces{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;align-items:start}
+.space{display:grid;gap:6px;align-content:start;min-height:96px;padding:10px;background:var(--surface);border:1px solid var(--line);border-radius:8px}
+.space .top{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.space[data-space=""]{background:var(--sunk);border-style:dashed}
+.space.over{border-color:var(--link);box-shadow:0 0 0 2px var(--link)}
+.deckchip{all:unset;box-sizing:border-box;display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:9px 10px;background:var(--bg);border:1px solid var(--line);border-radius:6px;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none}
+.deckchip:hover{border-color:var(--link)}.deckchip:focus-visible{outline:2px solid var(--link)}
+.deckchip.sel{border-color:var(--link);box-shadow:0 0 0 2px var(--link)}
+.deckchip.dragging{opacity:.35}
+.deckchip.ghost{position:fixed;left:0;top:0;z-index:60;pointer-events:none;cursor:grabbing;box-shadow:0 6px 18px rgba(0,0,0,.25)}
+.addspace{display:flex;gap:8px;align-items:end;flex-wrap:wrap}.addspace .field{flex:1 1 200px}
 dialog{border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--fg);padding:0;width:min(640px,calc(100vw - 24px));max-height:calc(100dvh - 24px)}
 dialog::backdrop{background:rgb(10 12 30 / .55)}
 .dlg{display:grid;gap:14px;padding:18px}

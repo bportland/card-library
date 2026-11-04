@@ -83,7 +83,9 @@ function stampPrice(list,c){
 const TYPES=['Pokemon','Trainer','Energy'];
 const DETAILS=['Basic Pokemon','Stage 1 Pokemon','Stage 2 Pokemon','Item','Stadium','Tool','Supporter','Basic Energy','Special Energy'];
 const ENERGIES=['Colorless','Dark','Dragon','Fairy','Fighting','Fire','Grass','Lightning','Metal','Psychic','Water'];
-const LOCATIONS=['Green Binder','Blue Binder','Box 1 (Gray)','Box 2 (Red)','In a Deck','Deckbox 1','Deckbox 2'];
+const LOCATIONS=['Green Binder','Blue Binder','Box 1 (Gray)','Box 2 (Red)','In a Deck'];
+// Where whole decks are put away, shown on the Where's my deck? tab (stored in meta/decks)
+const DECK_SPACES=['Deck Box 1','Deck Box 2','Gray Box','Red Box','Dragon Shield Box'];
 const PATTERNS=['Cosmos Holo','Poke Ball Pattern','Master Ball Pattern','Energy Pattern','Team Rocket Pattern','Quick Ball Pattern','Love Ball Pattern','Friend Ball Pattern','Dusk Ball Pattern'];
 const PRINTINGS=['Normal','Holofoil','Reverse Holofoil'];
 const STAMPS=['Play! Stamp','Set Logo Stamp'];
@@ -91,12 +93,12 @@ const RARITIES=['Common','Uncommon','Rare','Double Rare','Ultra Rare','Illustrat
 const RARITY_MARK={Common:'●',Uncommon:'◆',Rare:'★','Double Rare':'★★','Ultra Rare':'★★','Illustration Rare':'★','Special Illustration Rare':'★★','Hyper Rare':'★★★','Mega Hyper Rare':'✦','ACE SPEC Rare':'★',Promo:'P'};
 const NO_TOTAL=new Set(['MEP','UNK','Vintage']);
 const CK_RARITY={C:'Common',U:'Uncommon',R:'Rare',DR:'Double Rare',IR:'Illustration Rare',UR:'Ultra Rare',SIR:'Special Illustration Rare',MHR:'Mega Hyper Rare',RH:'Reverse Holos',MAIN:'Main set',SECRET:'Secret rares'};
-const VIEWS=['library','sets','checklist','places','trade','activity'];
+const VIEWS=['library','sets','checklist','places','decks','trade','activity'];
 const PAGE=150,PRICE_DAYS=7;
 
 const stored=(k,d)=>{try{return localStorage.getItem(k)??d}catch{return d}};
 const store=(k,v)=>{try{localStorage.setItem(k,v)}catch{}};
-const S={cards:[],byId:new Map(),checklists:{},activity:[],meta:{},view:'library',limit:PAGE,canWrite:true,ready:false,metaReady:false,ckFilter:'all',ckSel:stored('ck',''),ckNew:false,keep:+stored('keep','1')||1,editing:null,lookup:null,me:'',pending:{},timers:{}};
+const S={cards:[],byId:new Map(),checklists:{},activity:[],meta:{},view:'library',limit:PAGE,canWrite:true,ready:false,metaReady:false,ckFilter:'all',ckSel:stored('ck',''),ckNew:false,keep:+stored('keep','1')||1,editing:null,lookup:null,deckSel:'',me:'',pending:{},timers:{}};
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>'$'+Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -129,6 +131,7 @@ function prevDoc(path){
   const[col,id]=path.split('/');
   if(col==='cards'){const c=S.byId.get(id);if(!c)return null;const{id:_,...rest}=c;return rest}
   if(col==='checklists'){const ck=S.checklists[id];return ck?structuredClone(ck):null}
+  if(col==='meta'){const m=S.meta[id];return m?structuredClone(m):null}
   return null;
 }
 async function act(text,ops,extra=[],more={}){
@@ -244,7 +247,7 @@ function queueRender(){if(renderQueued)return;renderQueued=true;setTimeout(()=>{
 function render(){
   renderTally();renderLists();
   for(const v of VIEWS){$('view-'+v).hidden=S.view!==v;$('tab-'+v).setAttribute('aria-selected',S.view===v)}
-  ({library:renderLibrary,sets:renderSets,checklist:renderChecklist,places:renderPlaces,trade:renderTrade,activity:renderActivity})[S.view]();
+  ({library:renderLibrary,sets:renderSets,checklist:renderChecklist,places:renderPlaces,decks:renderDecks,trade:renderTrade,activity:renderActivity})[S.view]();
 }
 function renderTally(){
   const copies=S.cards.reduce((n,c)=>n+displayCount(c),0),val=S.cards.reduce((n,c)=>n+(c.price||0)*displayCount(c),0),priced=S.cards.filter(c=>c.price!=null).length;
@@ -258,9 +261,10 @@ function fillSelect(el,opts,placeholder){
   el.value=[...el.options].some(o=>o.value===cur)?cur:'';
 }
 const allLocs=()=>[...new Set([...LOCATIONS,...S.cards.map(c=>c.loc).filter(Boolean)])];
-// Any location with "deck" in its name (In a Deck, Deck Box 1, Deckbox 2) holds cards that are in a deck
-const inDeck=c=>/deck/i.test(c.loc||'');
-const whereText=c=>inDeck(c)?[c.loc==='In a Deck'?'':c.loc,c.deck?'Deck: '+c.deck:''].filter(Boolean).join(' · ')||'In a deck':c.loc||'';
+const inDeck=c=>c.loc==='In a Deck';
+// {spaces:[names], at:{deck name: space}}
+const deckHome=()=>({spaces:DECK_SPACES,at:{},...S.meta.decks});
+const whereText=c=>inDeck(c)?(c.deck?['Deck: '+c.deck,deckHome().at[c.deck]].filter(Boolean).join(' · '):'In a deck'):c.loc||'';
 const allDecks=()=>[...new Set(S.cards.map(c=>c.deck).filter(Boolean))].sort();
 function renderLists(){
   const sets=[...new Set(S.cards.map(c=>c.set).filter(Boolean))].sort((a,b)=>setLabel(a).localeCompare(setLabel(b)));
@@ -414,9 +418,100 @@ function renderPlaces(){
     <h2 style="margin-top:8px">Decks</h2><div class="places">${decks.map(d=>{
       const cards=S.cards.filter(c=>inDeck(c)&&c.deck===d),n=cards.reduce((t,c)=>t+displayCount(c),0),issues=deckIssues(cards);
       const check=issues.length?`<ul class="issues">${issues.map(i=>`<li>${esc(i)}</li>`).join('')}</ul>`:'<span class="small ok">✓ Meets the deck rules</span>';
-      return tile('deck:'+d,d,`${n} of 60 cards`,`<span class="bar"><i style="width:${Math.min(100,n/60*100).toFixed(1)}%"></i></span>${check}`)}).join('')}
-    ${loose?tile('deck:','Not assigned to a deck',`${loose} cards in a deck location with no deck name`):''}</div>
+      return tile('deck:'+d,d,[`${n} of 60 cards`,deckHome().at[d]].filter(Boolean).join(' · '),`<span class="bar"><i style="width:${Math.min(100,n/60*100).toFixed(1)}%"></i></span>${check}`)}).join('')}
+    ${loose?tile('deck:','Not assigned to a deck',`${loose} cards marked In a Deck with no deck name`):''}</div>
     <p class="small muted">Deck checks cover 60 cards, at most 4 copies of a card name (Basic Energy excepted), one ACE SPEC, one Radiant Pokémon and at least one Basic Pokémon. They use the card type and rarity recorded in your library.</p>`;
+}
+
+/* where's my deck? */
+function renderDecks(){
+  const home=deckHome(),decks=allDecks(),spaces=home.spaces;
+  const size=d=>S.cards.filter(c=>inDeck(c)&&c.deck===d).reduce((n,c)=>n+displayCount(c),0);
+  const chip=d=>`<button class="deckchip${S.deckSel===d?' sel':''}" data-deck="${esc(d)}" aria-pressed="${S.deckSel===d}"><b>${esc(d)}</b><span class="small muted">${size(d)} card${size(d)===1?'':'s'}</span></button>`;
+  const box=(space,name,list,canRemove)=>`<div class="space" data-space="${esc(space)}"><div class="top"><h3>${esc(name)}</h3>
+      ${canRemove?`<button class="linkbtn small" data-delspace="${esc(space)}" aria-label="Remove ${esc(name)}">Remove</button>`:`<span class="small muted">${list.length} deck${list.length===1?'':'s'}</span>`}</div>
+    ${list.map(chip).join('')||'<span class="small muted">Empty</span>'}</div>`;
+  const loose=decks.filter(d=>!spaces.includes(home.at[d]));
+  $('decks').innerHTML=`<div class="sectionhead"><div><h2>Where's my deck?</h2>
+      <span class="small muted">${S.canWrite?(S.deckSel?`Now tap where the ${esc(S.deckSel)} deck is kept.`:'Drag a deck onto the place it is kept, or tap a deck and then tap a place.'):'Where each deck is put away.'}</span></div></div>
+    <div class="spaces">${box('','Not put away',loose,false)}${spaces.map(s=>{const list=decks.filter(d=>home.at[d]===s);return box(s,s,list,S.canWrite&&!list.length)}).join('')}</div>
+    ${S.canWrite?`<form class="addspace" id="addSpace"><label class="field"><span>New storage space</span><input id="spaceName" autocomplete="off" placeholder="Such as Blue Box"></label><button class="btn">Add</button></form>`:''}
+    ${decks.length?'':'<p class="small muted">No decks yet. Give cards a deck name in the Deck field and they show up here.</p>'}`;
+}
+async function saveDeckHome(text,home){
+  // Drop decks that no longer have cards, so renamed or broken-up decks don't linger
+  const live=new Set(allDecks());home={spaces:home.spaces,at:Object.fromEntries(Object.entries(home.at).filter(([d])=>live.has(d)))};
+  // act() records the undo from the current state before it awaits, so show the change only after calling it
+  const saving=act(text,[{path:'meta/decks',set:home}]);
+  S.meta={...S.meta,decks:home};renderDecks();
+  try{toast(text,undoAction(await saving))}catch(e){toast(failMsg(e))}
+}
+function moveDeck(deck,space){
+  const home=deckHome(),from=home.at[deck]||'';S.deckSel='';
+  if(from===space){renderDecks();return}
+  const at={...home.at};if(space)at[deck]=space;else delete at[deck];
+  saveDeckHome(space?`Put the ${deck} deck in ${space}`:`Took the ${deck} deck out of ${from}`,{spaces:home.spaces,at});
+}
+// Pointer-based drag so it works with a finger as well as a mouse; a tap selects instead
+let drag=null;
+$('decks').addEventListener('pointerdown',e=>{
+  const chip=e.target.closest('.deckchip');if(!chip||!S.canWrite||e.button>0)return;
+  drag={chip,deck:chip.dataset.deck,x:e.clientX,y:e.clientY,ghost:null,over:null,id:e.pointerId};
+});
+$('decks').addEventListener('pointermove',e=>{
+  if(!drag||e.pointerId!==drag.id)return;
+  if(!drag.ghost){
+    if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)<6)return;
+    const r=drag.chip.getBoundingClientRect();drag.dx=drag.x-r.left;drag.dy=drag.y-r.top;
+    drag.ghost=drag.chip.cloneNode(true);drag.ghost.classList.add('ghost');drag.ghost.style.width=r.width+'px';document.body.append(drag.ghost);
+    drag.chip.classList.add('dragging');try{drag.chip.setPointerCapture(e.pointerId)}catch{}
+  }
+  drag.ghost.style.transform=`translate(${e.clientX-drag.dx}px,${e.clientY-drag.dy}px)`;
+  // Near the top or bottom edge, scroll so places further down a phone screen can be reached
+  const edge=70;if(e.clientY<edge)scrollBy(0,-14);else if(e.clientY>innerHeight-edge)scrollBy(0,14);
+  const over=document.elementFromPoint(e.clientX,e.clientY)?.closest('.space');
+  if(over!==drag.over){drag.over?.classList.remove('over');over?.classList.add('over');drag.over=over}
+});
+function endDrag(e,cancel){
+  if(!drag||e.pointerId!==drag.id)return;
+  const d=drag;drag=null;if(!d.ghost)return;
+  d.ghost.remove();d.chip.classList.remove('dragging');d.over?.classList.remove('over');
+  d.chip.dataset.dragged='1';// the click that follows a drag is not a tap
+  if(!cancel&&d.over)moveDeck(d.deck,d.over.dataset.space);
+}
+$('decks').addEventListener('pointerup',e=>endDrag(e,false));
+$('decks').addEventListener('pointercancel',e=>endDrag(e,true));
+$('decks').addEventListener('click',e=>{
+  if(!S.canWrite)return;
+  const chip=e.target.closest('.deckchip');
+  if(chip){if(chip.dataset.dragged){delete chip.dataset.dragged;return}S.deckSel=S.deckSel===chip.dataset.deck?'':chip.dataset.deck;renderDecks();return}
+  const del=e.target.closest('[data-delspace]');
+  if(del){const s=del.dataset.delspace,home=deckHome();saveDeckHome(`Removed the ${s} storage space`,{spaces:home.spaces.filter(x=>x!==s),at:home.at});return}
+  const space=e.target.closest('.space');
+  if(space&&S.deckSel)moveDeck(S.deckSel,space.dataset.space);
+});
+$('decks').addEventListener('submit',e=>{
+  e.preventDefault();
+  const name=$('spaceName').value.trim(),home=deckHome();if(!name)return;
+  if(home.spaces.some(s=>s.toLowerCase()===name.toLowerCase())){toast(`${name} is already listed.`);return}
+  saveDeckHome(`Added the ${name} storage space`,{spaces:[...home.spaces,name],at:home.at});
+});
+// Cards used to be filed under deck box locations; they are now In a Deck, and the box is where their deck is kept
+let deckLocsChecked=false;
+async function fixDeckLocations(){
+  if(deckLocsChecked||!S.ready||!S.metaReady||!S.canWrite)return;
+  deckLocsChecked=true;
+  const moved=S.cards.filter(c=>/deck/i.test(c.loc||'')&&c.loc!=='In a Deck');
+  if(!moved.length)return;
+  const home=deckHome(),spaces=[...home.spaces],at={...home.at};
+  for(const c of moved){
+    const box=c.loc.replace(/^deckbox\s*(\d+)$/i,'Deck Box $1');
+    if(!spaces.some(s=>s.toLowerCase()===box.toLowerCase()))spaces.push(box);
+    if(c.deck&&!at[c.deck])at[c.deck]=spaces.find(s=>s.toLowerCase()===box.toLowerCase());
+  }
+  const ops=[...moved.map(c=>({path:'cards/'+c.id,update:{loc:'In a Deck'}})),{path:'meta/decks',set:{spaces,at}}];
+  const text=`Moved ${moved.length} entr${moved.length===1?'y':'ies'} from deck box locations to In a Deck, and noted where their decks are kept`;
+  try{const id=await act(text,ops);toast(text,undoAction(id))}catch{}
 }
 
 /* trade pile */
@@ -483,9 +578,7 @@ function openEditor(c){
   fillSelect($('e-print'),PRINTINGS);fillSelect($('e-pattern'),PATTERNS,'None');fillSelect($('e-stamp'),STAMPS,'None');
   // A new card goes where the library is filtered to, otherwise the location starts blank and must be chosen
   const lo=$('f-loc').value,deck=lo.startsWith('deck:');
-  // Filtered to a deck: use the location that deck's cards are kept in, such as its deck box
-  const deckLoc=deck&&S.cards.find(x=>inDeck(x)&&(x.deck||'')===lo.slice(5))?.loc;
-  const v=c||{count:1,print:'Normal',loc:deck?deckLoc||'In a Deck':lo,deck:deck?lo.slice(5):''};
+  const v=c||{count:1,print:'Normal',loc:deck?'In a Deck':lo,deck:deck?lo.slice(5):''};
   for(const k of ['name','type','detail','energy','count','set','num','rarity','print','pattern','stamp','loc','deck','price','notes'])set('e-'+k,v[k]);
   if(!c)$('e-print').value='Normal';
   $('lookup').hidden=!S.canWrite;$('lookup').open=!c;
@@ -808,13 +901,13 @@ function startData(){
   stops.push(db.collection('cards').onSnapshot(snap=>{
     S.cards=snap.docs.map(d=>({id:d.id,count:1,...d.data()}));
     S.byId=new Map(S.cards.map(c=>[c.id,c]));
-    if(!snap.metadata.fromCache){clearTimeout(slow);if($('banner').textContent.startsWith('Your library is taking'))banner('');S.ready=true;maybeAutoPrices();fixSpecialEnergies()}
+    if(!snap.metadata.fromCache){clearTimeout(slow);if($('banner').textContent.startsWith('Your library is taking'))banner('');S.ready=true;maybeAutoPrices();fixSpecialEnergies();fixDeckLocations()}
     queueRender();
   },dataError));
   stops.push(db.collection('checklists').onSnapshot(snap=>{S.checklists=Object.fromEntries(snap.docs.map(d=>[d.id,d.data()]));queueRender()},dataError));
   stops.push(db.collection('meta').onSnapshot(snap=>{
     S.meta=Object.fromEntries(snap.docs.map(d=>[d.id,d.data()]));
-    if(!snap.metadata.fromCache){S.metaReady=true;maybeAutoPrices()}
+    if(!snap.metadata.fromCache){S.metaReady=true;maybeAutoPrices();fixDeckLocations()}
     queueRender();
   },dataError));
   stops.push(db.collection('activity').recent('at',100,snap=>{S.activity=snap.docs.map(d=>({...d.data(),id:d.id}));if(S.view==='activity')queueRender()},dataError));

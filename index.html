@@ -16,7 +16,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=DM+Mono:wght@400;500&display=swap">
 <!-- Bump ?v= on styles.css and app.js with every release so browsers don't mix an old script with a new page -->
-<link rel="stylesheet" href="styles.css?v=20261104a">
+<link rel="stylesheet" href="styles.css?v=20261104b">
 </head>
 <body>
 
@@ -39,6 +39,7 @@
     <button class="tab" id="tab-sets" data-view="sets">Sets</button>
     <button class="tab" id="tab-checklist" data-view="checklist">Checklists</button>
     <button class="tab" id="tab-places" data-view="places">Boxes &amp; decks</button>
+    <button class="tab" id="tab-decks" data-view="decks">Where's my deck?</button>
     <button class="tab" id="tab-trade" data-view="trade">Trade pile</button>
     <button class="tab" id="tab-activity" data-view="activity">Activity</button>
     <div class="actions">
@@ -77,6 +78,7 @@
   <section id="view-sets" hidden><div class="sets" id="sets"></div></section>
   <section id="view-checklist" hidden><div id="checklist" style="display:grid;gap:10px"></div></section>
   <section id="view-places" hidden><div id="places" style="display:grid;gap:12px"></div></section>
+  <section id="view-decks" hidden><div id="decks" style="display:grid;gap:12px"></div></section>
   <section id="view-trade" hidden><div id="trade" style="display:grid;gap:10px"></div></section>
   <section id="view-activity" hidden><div id="activity" style="display:grid;gap:10px"></div></section>
   <footer class="foot">
@@ -145,6 +147,6 @@
 
 <datalist id="nameList"></datalist><datalist id="setList"></datalist><datalist id="locList"></datalist><datalist id="deckList"></datalist>
 <div id="toast" role="status" aria-live="polite" hidden></div>
-<script type="module" src="app.js?v=20261104a"></script>
+<script type="module" src="app.js?v=20261104b"></script>
 </body>
 </html>

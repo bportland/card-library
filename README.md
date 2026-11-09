@@ -16,7 +16,7 @@ The security rules, and any backup files, are kept out of this repository on pur
 - **[TCGdex](https://tcgdex.dev)**: card search, set lists, card details, card images and market prices, through its free API (`api.tcgdex.net`) and image host (`assets.tcgdex.net`). The prices TCGdex reports come from [TCGplayer](https://www.tcgplayer.com).
 - **[TCGplayer](https://www.tcgplayer.com)**: the source of the market prices shown in the app, for regular, patterned and stamped cards.
 - **[TCGCSV](https://tcgcsv.com)**: a daily copy of TCGplayer's price data. TCGdex has no prices for stamped cards, so the weekly GitHub Action downloads those from TCGCSV (eight small files a week) and saves them on the `prices` branch for the app to read.
-- **[Limitless TCG](https://limitlesstcg.com)**: card images for the basic energy sets (Mega Evolution Energy and Scarlet & Violet Energy), which TCGdex has no images for.
+- **[Limitless TCG](https://limitlesstcg.com)**: card images for the basic energy sets (Mega Evolution Energy and Scarlet & Violet Energy), and for any card whose TCGdex image is not available yet, such as cards from newly released sets.
 - **[Firebase](https://firebase.google.com)** (Google): sign-in and the shared card database.
 - **[GitHub Pages](https://pages.github.com)** and **[GitHub Actions](https://github.com/features/actions)**: hosting and the weekly price job.
 - **[Google Fonts](https://fonts.google.com)**: the [Atkinson Hyperlegible](https://fonts.google.com/specimen/Atkinson+Hyperlegible), [Bricolage Grotesque](https://fonts.google.com/specimen/Bricolage+Grotesque) and [DM Mono](https://fonts.google.com/specimen/DM+Mono) typefaces, under the SIL Open Font License.

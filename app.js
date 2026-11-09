@@ -55,6 +55,11 @@ function tcgdexImage(id,size='low',lang='en'){
   if(/^[a-z]+p$/.test(set))serie=serie.slice(0,-1);// promo sets such as mep live under their series
   return `https://assets.tcgdex.net/${lang}/${serie}/${set}/${id.slice(i+1)}/${size}.webp`;
 }
+// Limitless TCG has art for new sets before TCGdex does; images fall back to it when the TCGdex one fails to load
+const limitlessImage=(set,num,size='low')=>{
+  const n=String(num||'').split('/')[0];
+  return set&&/^\d+$/.test(n)?`https://limitlesstcg.nyc3.cdn.digitaloceanspaces.com/tpci/${set}/${set}_${n.padStart(3,'0')}_R_EN_${size==='high'?'LG':'SM'}.png`:'';
+};
 const cardImage=(c,size='low')=>c.img?`${c.img}/${size}.webp`:tcgdexImage(tcgdexId(c),size,tcgdexLang(c));
 function marketPrice(tcgplayer,print){
   if(!tcgplayer)return null;
@@ -278,7 +283,8 @@ function renderLists(){
 }
 function rarityMark(r){const m=RARITY_MARK[r];return m?`<span class="stars${r==='ACE SPEC Rare'?' ace':''}" aria-hidden="true">${m}</span> `:''}
 const pipAttr=c=>c.energy?`style="--e:var(--e-${esc(c.energy.toLowerCase())})" title="${esc(c.energy)}"`:'';
-const thumbHTML=c=>{const img=cardImage(c);return `<span class="thumb">${img?`<img loading="lazy" src="${esc(img)}" alt="">`:''}</span>`};
+const thumbHTML=c=>{const img=cardImage(c)||limitlessImage(c.set,c.num),alt=limitlessImage(c.set,c.num);
+  return `<span class="thumb">${img?`<img loading="lazy" src="${esc(img)}"${alt&&alt!==img?` data-alt="${esc(alt)}"`:''} alt="">`:''}</span>`};
 function rowHTML(c,td){
   const bits=[];
   if(c.set||c.num)bits.push(`<span class="mono">${esc([c.set,c.num].filter(Boolean).join(' '))}</span>`);
@@ -373,7 +379,7 @@ function renderChecklist(){
     html+=`<div class="sectionhead"><h3>${esc(CK_RARITY[g]||g)}</h3><span class="small muted mono">${got}/${all.length}</span></div><div class="page">`+show.map(x=>{
       const n=own.get(numKey(x.id)),h=!!n,w=wish.has(x.id);
       return `<button class="pocket${h?' have':w?' wish':''}" data-wish="${esc(x.id)}" aria-label="${esc(x.name)}, number ${esc(x.id)}, ${h?'collected':w?'on wishlist':'needed'}"${h||!S.canWrite?' aria-disabled="true"':''}>
-        <img loading="lazy" src="${esc(pocketImage(ck,x))}" alt=""><span class="n"><span>${esc(x.id)}</span><span>${h?'×'+n:w?'★':''}</span></span><span>${esc(x.name)}</span></button>`}).join('')+'</div>';
+        <img loading="lazy" src="${esc(pocketImage(ck,x))}" data-alt="${esc(limitlessImage(ck.code,x.id.split(' ')[0]))}" alt=""><span class="n"><span>${esc(x.id)}</span><span>${h?'×'+n:w?'★':''}</span></span><span>${esc(x.name)}</span></button>`}).join('')+'</div>';
   }
   el.innerHTML=html;
   if(S.ckNew)fillNewChecklistSets();
@@ -572,7 +578,7 @@ function openEditor(c){
   if($('editor').open)$('editor').close();
   S.editing=c||null;S.lookup=null;
   $('editTitle').textContent=c?c.name:'Add card';
-  showBig(c?cardImage(c,'high'):'');
+  showBig(c?cardImage(c,'high'):'',c&&limitlessImage(c.set,c.num,'high'));
   const set=(id,v)=>$(id).value=v??'';
   fillSelect($('e-type'),TYPES,'');fillSelect($('e-detail'),DETAILS,'');fillSelect($('e-energy'),ENERGIES,'None');fillSelect($('e-rarity'),RARITIES,'Not recorded');
   fillSelect($('e-print'),PRINTINGS);fillSelect($('e-pattern'),PATTERNS,'None');fillSelect($('e-stamp'),STAMPS,'None');
@@ -592,7 +598,18 @@ function openEditor(c){
   $('editor').showModal();
   if(!c)$('l-q').focus();
 }
-function showBig(src){$('e-img').hidden=!src;if(src)$('e-img').src=src;else $('e-img').removeAttribute('src')}
+function showBig(src,alt){
+  const img=$('e-img');src=src||alt;img.hidden=!src;
+  if(alt&&alt!==src)img.dataset.alt=alt;else delete img.dataset.alt;
+  if(src)img.src=src;else img.removeAttribute('src');
+}
+// A card image that fails to load tries its Limitless TCG copy once (data-alt), or looks up its set's code first (data-alt-set)
+document.addEventListener('error',e=>{
+  const img=e.target;if(img.tagName!=='IMG')return;
+  if(img.dataset.alt){const alt=img.dataset.alt;delete img.dataset.alt;img.src=alt;return}
+  const set=img.dataset.altSet;if(!set)return;delete img.dataset.altSet;
+  api('en/sets/'+encodeURIComponent(set)).then(info=>{const a=limitlessImage(info.abbreviation?.official,img.dataset.altNum);if(a)img.src=a}).catch(()=>{});
+},true);
 function lookupMsg(html){$('l-msg').innerHTML=html;$('l-msg').hidden=!html}
 async function fillLookupSets(want){
   const sel=$('l-set');
@@ -615,7 +632,7 @@ async function runLookup(){
     if(!list.length){lookupMsg('No cards found. Check the spelling, or try a shorter name.');return}
     const max=120;
     lookupMsg(list.length>max?`Showing the newest ${max} of ${list.length} cards. Choose a set to narrow it down.`:`${list.length} card${list.length===1?'':'s'} found. Tap the one you have.`);
-    R.innerHTML=list.slice(0,max).map(x=>{const img=x.image?x.image+'/low.webp':tcgdexImage(x.id);return `<button type="button" class="pick" data-pick="${esc(x.id)}">${img?`<img loading="lazy" src="${esc(img)}" alt="">`:'<span class="noimg"></span>'}
+    R.innerHTML=list.slice(0,max).map(x=>{const img=x.image?x.image+'/low.webp':tcgdexImage(x.id);return `<button type="button" class="pick" data-pick="${esc(x.id)}">${img?`<img loading="lazy" src="${esc(img)}" data-alt-set="${esc(setOf(x.id))}" data-alt-num="${esc(x.localId)}" alt="">`:'<span class="noimg"></span>'}
       <span class="nm">${esc(x.name)}</span><span class="small muted">${esc(names.get(setOf(x.id)))} · ${esc(x.localId)}</span></button>`}).join('');
   }catch{lookupMsg('Card search is unavailable right now. Check your connection and try again.')}
 }
@@ -628,7 +645,7 @@ async function pickCard(id){
     S.lookup={set:c.set,num:c.num,tcg:c.tcg,img:c.img,setName:SETS[abbr]?'':(info?.name||d.set?.name||''),card:d};
     for(const k of ['name','type','detail','energy','set','num','rarity'])$('e-'+k).value=c[k]||'';
     $('e-print').value=print;lookupPrice();
-    showBig(cardImage(c,'high'));$('l-results').innerHTML='';$('lookup').open=false;
+    showBig(cardImage(c,'high'),limitlessImage(c.set,c.num,'high'));$('l-results').innerHTML='';$('lookup').open=false;
     let msg=`Filled in from ${esc(info?.name||abbr)} ${esc(c.num)}. Check the printing, count and location, then save.`;
     if(!S.editing){
       const same=S.cards.filter(x=>x.tcg===c.tcg||(x.set===c.set&&x.num===c.num));

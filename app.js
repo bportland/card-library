@@ -210,7 +210,7 @@ function reviewReason(c,td){
   if(!c.set&&c.detail!=='Basic Energy')return 'Set missing';
   if(c.set==='UNK')return 'Set unknown';
   if(c.set&&!c.rarity)return 'Rarity missing';
-  if(c.set&&!NO_TOTAL.has(c.set)&&denom(c)&&denom(c)!==td[c.set])return 'Number does not fit this set';
+  if(c.set&&!c.tcg&&!NO_TOTAL.has(c.set)&&denom(c)&&denom(c)!==td[c.set])return 'Number does not fit this set';
   return '';
 }
 function displayCount(c){return S.pending[c.id]??c.count}
@@ -689,27 +689,81 @@ function planImport(rows){
   const known=new Map(S.cards.map(c=>[norm(c.name),c]));
   return rows.map(parseTcgRow).filter(r=>r.name).map(r=>{const hits=idx.get(identity(r))||[];return {...r,hits,like:known.get(norm(r.name))}});
 }
-function openImport(rows){
+// Sets missing from SETS (new ones such as 30th Celebration) are looked up in TCGdex by name, and each card by number or name
+const nameKey=s=>norm(s).replace(/\s*\(.*?\)/g,'').replace(/[^a-z0-9]/g,'');
+async function resolveSets(plan){
+  const todo=plan.filter(r=>!r.set&&r.setName);if(!todo.length)return;
+  let sets;try{sets=await tcgSets()}catch{return}
+  const words=s=>norm(s).split(/[^a-z0-9&]+/).filter(Boolean);
+  const findSet=name=>{
+    const short=norm(name.split(': ').pop()),exact=sets.find(s=>norm(s.name)===short);if(exact)return exact;
+    // "30th Celebration Classic Collection" is "30th Classic Collection" in TCGdex: allow one extra word
+    const w=new Set(words(short));let best=null;
+    for(const s of sets){const sw=words(s.name);if(sw.every(x=>w.has(x))&&w.size-sw.length<=1&&(!best||sw.length>words(best.name).length))best=s}
+    return best;
+  };
+  const bySet=new Map();for(const r of todo)(bySet.get(r.setName)||bySet.set(r.setName,[]).get(r.setName)).push(r);
+  for(const [name,list] of bySet){
+    const s=findSet(name);if(!s)continue;
+    let info;try{info=await api('en/sets/'+encodeURIComponent(s.id))}catch{continue}
+    const abbr=(info.abbreviation?.official||s.id.toUpperCase())+(/classic collection/i.test(info.name)?'-CC':'');
+    for(const r of list){
+      const base=numKey(String(r.num).split('/')[0]),named=info.cards.filter(x=>nameKey(x.name)===nameKey(r.name));
+      // Classic Collection cards keep their original numbers, so fall back to a unique name
+      const hit=named.find(x=>numKey(x.localId)===base)||(named.length===1?named[0]:null);
+      Object.assign(r,{rawSet:r.setName,set:abbr,setName:info.name});
+      if(hit)Object.assign(r,{tcg:hit.id,img:hit.image||''});
+    }
+  }
+  // New cards in these sets take their type and rarity from TCGdex
+  const need=todo.filter(r=>r.tcg&&!r.hits.length);
+  await Promise.all(Array.from({length:6},async()=>{
+    while(need.length){const r=need.pop();
+      try{const f=fromTcgdex(await api('en/cards/'+encodeURIComponent(r.tcg)),r.set);
+        r.info={type:f.type,detail:f.detail,energy:f.energy};r.img=f.img||r.img;
+        if(!RARITIES.includes(r.rarity))r.rarity=f.rarity||(r.rarity?'Other':'')}catch{}}
+  }));
+}
+// Copies go onto an entry already in the chosen location; anywhere else, a new entry is made there
+const importTarget=(r,loc)=>r.hits.find(c=>c.loc===loc&&!c.deck);
+function importSummary(){
+  if(!IMP)return;
+  const loc=$('impLoc').value.trim(),there=IMP.filter(r=>importTarget(r,loc)).length;
+  $('impSummary').textContent=`${IMP.length} cards in this file: ${there} already in ${loc||'this location'}, ${IMP.length-there} new there. Add to library raises the count on entries in this location and creates the rest, so import each scan only once.`;
+  $('impList').innerHTML=IMP.map(r=>`<div>${importTarget(r,loc)?'+'+r.qty:'New'} <b>${esc(r.name)}</b> <span class="mono muted">${esc(r.set?r.set+' ':'')}${esc(r.num)}</span> <span class="muted">${esc(r.print)}${r.pattern?', '+esc(r.pattern):''}${r.price!=null?', '+money(r.price):''}</span></div>`).join('');
+}
+async function openImport(rows){
+  banner('Reading the file…');
   IMP=planImport(rows);
-  const old=IMP.filter(r=>r.hits.length),fresh=IMP.filter(r=>!r.hits.length);
-  $('impSummary').textContent=`${IMP.length} cards in this file: ${old.length} already in your library, ${fresh.length} new. Add to library raises the count on existing cards and creates the new ones, so import each scan only once.`;
-  $('impList').innerHTML=IMP.map(r=>`<div>${r.hits.length?'+'+r.qty:'New'} <b>${esc(r.name)}</b> <span class="mono muted">${esc(r.num)}</span> <span class="muted">${esc(r.print)}${r.pattern?', '+esc(r.pattern):''}${r.price!=null?', '+money(r.price):''}</span></div>`).join('');
-  $('impLoc').value='Box 2 (Red)';
+  await resolveSets(IMP);
+  banner('');
+  const lo=$('f-loc').value;
+  $('impLoc').value=lo&&!lo.startsWith('deck:')?lo:'Box 2 (Red)';
+  importSummary();
   $('importer').showModal();
 }
 async function runImport(addCards){
-  const plan=IMP||[],loc=$('impLoc').value.trim()||'Box 2 (Red)',today=new Date().toISOString().slice(0,10);
+  const plan=IMP||[],loc=$('impLoc').value.trim(),today=new Date().toISOString().slice(0,10);
+  if(addCards&&!loc){toast('Choose where to add these cards.');return}
   $('importer').close();
-  const ops=[];
+  // The same card can appear on several rows: keep adding to one running count, and to one new entry
+  const ops=[],counts=new Map(),made=new Map();
   for(const r of plan){
-    const priced=r.price!=null?{price:r.price,priceDate:today}:{};
-    r.hits.forEach((c,i)=>{
-      const add=addCards&&i===0?{count:c.count+r.qty}:{};
-      if(Object.keys({...priced,...add}).length)ops.push({path:'cards/'+c.id,update:{...priced,...add}});
+    const priced=r.price!=null?{price:r.price,priceDate:today}:{},target=addCards&&importTarget(r,loc);
+    const again=addCards&&!target&&made.get(identity(r)+'|'+(r.set||''));
+    if(again){again.set.count+=r.qty;Object.assign(again.set,priced);continue}
+    // Entries imported before their set was known get it filled in now
+    const link=r.tcg||r.rawSet?clean({set:r.set,tcg:r.tcg,img:r.img,setName:SETS[r.set]?'':r.setName}):{};
+    r.hits.forEach(c=>{
+      const fix=!c.set&&r.set?{...link,...(c.notes==='Set: '+r.rawSet?{notes:''}:{})}:{};
+      if(c===target)counts.set(c.id,(counts.get(c.id)??c.count)+r.qty);
+      const add=c===target?{count:counts.get(c.id)}:{};
+      if(Object.keys({...priced,...add,...fix}).length)ops.push({path:'cards/'+c.id,update:{...priced,...fix,...add}});
     });
-    if(addCards&&!r.hits.length){
-      const l=r.like||{};
-      ops.push({path:'cards/'+newId(),set:clean({name:r.name,type:l.type,detail:l.detail,energy:l.energy,count:r.qty,loc,set:r.set,num:r.num,rarity:r.rarity,print:r.print,pattern:r.pattern,stamp:r.stamp,...priced,notes:r.set?'':'Set: '+r.setName})});
+    if(addCards&&!target){
+      const l=r.hits[0]||r.like||{},info=r.info||{};
+      const op={path:'cards/'+newId(),set:clean({name:r.name,type:info.type||l.type,detail:info.detail||l.detail,energy:info.energy||l.energy,count:r.qty,loc,set:r.set,num:r.num,rarity:r.rarity,print:r.print,pattern:r.pattern,stamp:r.stamp,...link,...priced,notes:r.set?'':'Set: '+r.setName})};
+      ops.push(op);made.set(identity(r)+'|'+(r.set||''),op);
     }
   }
   banner(addCards?'Importing…':'Updating prices…');
@@ -870,6 +924,7 @@ $('importFile').addEventListener('change',async e=>{
   openImport(rows);
 });
 $('impCancel').onclick=()=>$('importer').close();
+$('impLoc').addEventListener('input',importSummary);
 $('impAdd').onclick=()=>runImport(true);$('impPrices').onclick=()=>runImport(false);
 $('exportBtn').onclick=exportCSV;
 $('backupBtn').onclick=downloadBackup;

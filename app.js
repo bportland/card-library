@@ -855,6 +855,20 @@ async function updatePrices(quiet){
   }catch(e){banner('');if(!quiet)toast(failMsg(e))}
   btn.disabled=false;
 }
+// Cards imported before unknown sets were looked up have no set, only a "Set: ME06: Delta Reign" note
+let setsChecked=false;
+async function fixUnknownSets(){
+  if(setsChecked||!S.ready||!S.canWrite)return;
+  setsChecked=true;
+  const rows=S.cards.filter(c=>!c.set&&/^Set: ./.test(c.notes||'')).map(c=>({card:c,name:c.name.replace(/ \(JPN\)$/,''),num:c.num||'',setName:c.notes.slice(5),set:'',rarity:c.rarity||'',hits:[]}));
+  if(!rows.length)return;
+  await resolveSets(rows);
+  const ops=rows.filter(r=>r.set).map(({card:c,...r})=>({path:'cards/'+c.id,update:{notes:'',...clean({set:r.set,tcg:r.tcg,img:r.img,setName:SETS[r.set]?'':r.setName,
+    type:c.type?'':r.info?.type,detail:c.detail?'':r.info?.detail,energy:c.energy?'':r.info?.energy,rarity:RARITIES.includes(c.rarity)?'':r.rarity})}}));
+  if(!ops.length)return;
+  const text=`Filled in the set on ${ops.length} imported card${ops.length===1?'':'s'}`;
+  try{const id=await act(text,ops);toast(text,undoAction(id))}catch{}
+}
 // Special energies added through card search before the type fix were saved as Basic Energy with no type
 let energyChecked=false;
 async function fixSpecialEnergies(){
@@ -973,7 +987,7 @@ function startData(){
   stops.push(db.collection('cards').onSnapshot(snap=>{
     S.cards=snap.docs.map(d=>({id:d.id,count:1,...d.data()}));
     S.byId=new Map(S.cards.map(c=>[c.id,c]));
-    if(!snap.metadata.fromCache){clearTimeout(slow);if($('banner').textContent.startsWith('Your library is taking'))banner('');S.ready=true;maybeAutoPrices();fixSpecialEnergies();fixDeckLocations()}
+    if(!snap.metadata.fromCache){clearTimeout(slow);if($('banner').textContent.startsWith('Your library is taking'))banner('');S.ready=true;maybeAutoPrices();fixSpecialEnergies();fixDeckLocations();fixUnknownSets()}
     queueRender();
   },dataError));
   stops.push(db.collection('checklists').onSnapshot(snap=>{S.checklists=Object.fromEntries(snap.docs.map(d=>[d.id,d.data()]));queueRender()},dataError));
